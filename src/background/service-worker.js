@@ -130,6 +130,20 @@ async function onSubmissionDetected(tab, msg) {
   }
 }
 
+// ---------- 学习模式: 聚合各框架收集的已填资料 ----------
+let learnItems = [];
+let learnTimer = null;
+
+function collectLearnItems() {
+  clearTimeout(learnTimer);
+  learnTimer = setTimeout(() => {
+    const items = learnItems;
+    learnItems = [];
+    chrome.tabs.sendMessage(learnTabId, { type: 'AF_LEARN_SHOW', items }).catch(() => {});
+  }, 1200);
+}
+let learnTabId = null;
+
 // ---------- 消息路由 ----------
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return;
@@ -139,6 +153,66 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       aggCollector.push(msg.payload || {});
       aggregateFillResults();
       break;
+
+    case 'AF_LEARN_COLLECT_RESULT':
+      if (sender.tab) {
+        learnTabId = sender.tab.id;
+        learnItems = learnItems.concat(msg.items || []);
+        collectLearnItems();
+      }
+      break;
+
+    case 'AF_LEARN_COLLECT': {
+      // 面板/弹窗请求: 转发给当前活动标签页
+      getActiveTab().then((tab) => {
+        if (tab) chrome.tabs.sendMessage(tab.id, { type: 'AF_LEARN_COLLECT' }).catch(() => {});
+      });
+      break;
+    }
+
+    case 'AF_LEARN_SAVE':
+      AS.storage.getActiveProfile().then(async (profile) => {
+        if (!profile) return sendResponse({ saved: 0, error: '无信息方案' });
+        const d = profile.data;
+        const settings = await AS.storage.getSettings();
+        let saved = 0;
+        for (const it of msg.items || []) {
+          if (!it || it.value === undefined || it.value === null || String(it.value).trim() === '') continue;
+          if (it.type === 'openQuestions') {
+            d.openQuestions = d.openQuestions || [];
+            const dup = d.openQuestions.some((q) => q.question === it.question && q.answer === it.answer);
+            if (!dup) { d.openQuestions.push({ question: it.question || '开放题', answer: String(it.value).trim() }); saved++; }
+            continue;
+          }
+          if (it.type === 'custom') {
+            d.custom = d.custom || [];
+            const dup = d.custom.some((c) => c.key === it.key && c.value === it.value);
+            if (!dup) {
+              d.custom.push({ key: it.key || 'f' + Date.now().toString(36), label: it.label || '自定义', value: String(it.value).trim() });
+              saved++;
+            }
+            continue;
+          }
+          const base = String(it.fieldKey || '').replace(/\[\d+\]/g, '');
+          const [catId, key] = base.split('.');
+          const cat = AS.schema.findCategory(catId);
+          if (!cat || !key || cat.repeatable) continue;
+          let val = String(it.value).trim();
+          const def = AS.schema.getFieldDef(base);
+          if (def && def.sensitive && settings.encryption && settings.encryption.enabled) {
+            if (AS.encrypt.hasKey()) {
+              try { val = await AS.encrypt.encryptWithSession(val); } catch (e) { LOG.error('bg', 'learn encrypt failed', e); }
+            } else {
+              continue; // 加密未解锁, 跳过敏感字段
+            }
+          }
+          if (d[catId][key] !== val) { d[catId][key] = val; saved++; }
+        }
+        if (saved) { profile.updatedAt = Date.now(); await AS.storage.saveProfile(profile); }
+        LOG().info('bg', 'learn saved', saved);
+        sendResponse({ saved });
+      }).catch((e) => { LOG.error('bg', 'learn save failed', e); sendResponse({ saved: 0, error: e.message || String(e) }); });
+      return true;
 
     case 'AF_SUBMISSION': {
       const tab = sender.tab;

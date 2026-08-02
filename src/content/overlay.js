@@ -117,6 +117,14 @@
             } }),
           ]),
         ] : null,
+        h('div', { class: 'af-actions' }, [
+          h('button', {
+            class: 'af-btn ghost', text: '📥 导入页面已填资料到信息库', onclick: () => {
+              closePanel();
+              chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT' });
+            },
+          }),
+        ]),
         h('div', { class: 'af-hint', text: '插件绝不会自动提交表单, 请自行检查并点击提交。' }),
       ]),
     ]));
@@ -219,11 +227,63 @@
     return panel;
   }
 
+  // ---------- 学习模式: 捕获页面已填内容 ----------
+  function showLearnPanel(items, onDone) {
+    if (!items || !items.length) {
+      toast('未发现可导入的新资料(页面填写内容与信息库相同, 或字段无法识别)');
+      return;
+    }
+    const selected = new Set(items.map((_, i) => i));
+    const rows = items.map((it, i) => {
+      const label = it.type === 'openQuestions' ? ('开放题: ' + (it.question || '开放题')) : it.label || it.fieldKey || '字段';
+      const cb = h('input', { type: 'checkbox', checked: '', dataIdx: String(i) });
+      cb.addEventListener('change', (e) => {
+        if (e.target.checked) selected.add(i); else selected.delete(i);
+      });
+      return h('div', { class: 'af-item' }, [
+        cb,
+        h('span', { class: 't', style: 'flex:1', text: label }),
+        h('span', { style: 'color:#2563eb;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: String(it.value).slice(0, 30) }),
+      ]);
+    });
+    const panel = showPanel(h('div', {}, [
+      head('发现可导入的新资料'),
+      h('div', { class: 'af-body' }, [
+        h('p', { style: 'font-size:12px;color:#6b7280;margin-bottom:8px', text: '以下内容与信息库不同/缺失, 勾选后导入本地信息库, 下次遇到匹配字段将自动填充。' }),
+        h('div', { class: 'af-list', style: 'max-height:300px' }, rows),
+        h('div', { class: 'af-actions' }, [
+          h('button', { class: 'af-btn ghost', text: '取消', onclick: closePanel }),
+          h('button', { class: 'af-btn primary', text: '导入所选', onclick: async () => {
+            const chosen = items.filter((_, i) => selected.has(i));
+            if (!chosen.length) { toast('未选择任何项'); return; }
+            const btn = panel.querySelector('.af-btn.primary');
+            btn.disabled = true; btn.textContent = '导入中...';
+            try {
+              const r = await chrome.runtime.sendMessage({ type: 'AF_LEARN_SAVE', items: chosen });
+              if (r && r.saved > 0) {
+                toast(`已导入 ${r.saved} 项到信息库 ✔`);
+                closePanel();
+                onDone && onDone(r.saved);
+              } else {
+                btn.disabled = false; btn.textContent = '导入所选';
+                toast(r && r.error ? '导入失败: ' + r.error : '没有可导入的新内容');
+              }
+            } catch (e) {
+              btn.disabled = false; btn.textContent = '导入所选';
+              toast('导入失败: ' + (e.message || e));
+            }
+          } }),
+        ]),
+      ]),
+    ]));
+    return panel;
+  }
+
   function toast(msg, ms) {
     const t = h('div', { class: 'af-toast', text: msg });
     shadow.appendChild(t);
     setTimeout(() => t.remove(), ms || 3000);
   }
 
-  AS.overlay = { showSummary, showRecordPanel, showUnlockPrompt, toast, closePanel };
+  AS.overlay = { showSummary, showRecordPanel, showUnlockPrompt, showLearnPanel, toast, closePanel };
 })();

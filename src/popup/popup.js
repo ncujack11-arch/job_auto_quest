@@ -105,6 +105,15 @@
     $('manageProfiles').addEventListener('click', () => chrome.runtime.openOptionsPage());
     $('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage());
     $('refreshScan').addEventListener('click', scanCount);
+    $('learnBtn').addEventListener('click', async () => {
+      if (!currentTab) return;
+      try {
+        await chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT' });
+        window.close();
+      } catch (e) {
+        showStatus('error', '无法在此页面捕获');
+      }
+    });
     $('manualRecord').addEventListener('click', async () => {
       if (!currentTab) return;
       try {

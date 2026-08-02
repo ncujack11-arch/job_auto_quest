@@ -252,6 +252,76 @@
     };
   }
 
+  // ---------- 学习模式: 捕获页面手动填写内容 ----------
+  function fieldValue(field) {
+    const el = field.el;
+    try {
+      switch (field.type) {
+        case 'checkbox': return el.checked ? '是' : '';
+        case 'radio': {
+          const checked = (field.group || []).find((r) => r.checked);
+          if (!checked) return '';
+          const label = checked.labels && checked.labels[0] ? checked.labels[0].textContent.trim() : '';
+          return label || checked.value || '是';
+        }
+        case 'select': {
+          const o = el.selectedOptions && el.selectedOptions[0];
+          return o ? (o.textContent || o.value || '') : '';
+        }
+        case 'richtext': return (el.textContent || '').trim();
+        case 'custom': {
+          const input = field.custom ? field.custom.querySelector('input:not([type="hidden"]),textarea') : null;
+          return input ? input.value : (el.value || '');
+        }
+        default: return el.value || '';
+      }
+    } catch (e) { return ''; }
+  }
+
+  async function collectManualInputs() {
+    const profile = await AS.storage.getActiveProfile();
+    if (!profile) {
+      AS.overlay.toast('信息库为空, 请先在配置页创建方案');
+      return [];
+    }
+    const rule = await AS.storage.getSiteRuleForHost(location.hostname);
+    const fields = AS.scanner.scan();
+    const items = [];
+    const seen = new Set();
+    for (const field of fields) {
+      const raw = fieldValue(field);
+      const value = raw === null || raw === undefined ? '' : String(raw).trim();
+      if (!value) continue;
+      const ctx = AS.matcher.buildContext(field.el);
+
+      // 开放题答案 → 题库
+      if (AS.matcher.isOpenQuestionField(ctx)) {
+        const question = (ctx.labelText || ctx.placeholder || ctx.name || '开放题').slice(0, 60);
+        const dupKey = 'oq|' + question + '|' + value;
+        if (!seen.has(dupKey)) { seen.add(dupKey); items.push({ type: 'openQuestions', question, answer: value, value }); }
+        continue;
+      }
+      const m = AS.matcher.matchField(ctx, rule);
+      if (!m) continue;
+      const base = m.fieldKey.replace(/\[\d+\]/g, '');
+      const [catId] = base.split('.');
+      const cat = AS.schema.findCategory(catId);
+      if (!cat || cat.repeatable || catId === 'openQuestions') continue;
+      const vals = AS.matcher.resolveValues(profile, m.fieldKey);
+      if (vals.includes(value)) continue; // 库中已有相同值
+      const dupKey = 'f|' + base + '|' + value;
+      if (seen.has(dupKey)) continue;
+      seen.add(dupKey);
+      items.push({
+        type: 'field', fieldKey: m.fieldKey, catId, key: base.split('.')[1],
+        label: ctx.labelText || ctx.placeholder || ctx.name || '未知字段',
+        value,
+      });
+    }
+    LOG().info('content', 'learn collected', items.length, 'items in', frameLabel());
+    return items;
+  }
+
   // ---------- 消息路由 ----------
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || typeof msg !== 'object') return;
@@ -273,6 +343,18 @@
         sendResponse({ total: fields.length, hostname: location.hostname });
         break;
       }
+      case 'AF_LEARN_COLLECT':
+        collectManualInputs().then((items) => {
+          if (items.length) {
+            chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT_RESULT', items }).catch((e) => LOG().warn('content', 'learn result send failed', e));
+          }
+        });
+        break;
+      case 'AF_LEARN_SHOW':
+        if (window.top === window && msg.items && msg.items.length) {
+          AS.overlay.showLearnPanel(msg.items);
+        }
+        break;
       case 'AF_FILL_SUMMARY':
         if (window.top === window && msg.summary) {
           AS.overlay.showSummary(msg.summary);
@@ -284,5 +366,5 @@
     return true;
   });
 
-  AS.contentMain = { doFill, grabPageInfo };
+  AS.contentMain = { doFill, grabPageInfo, collectManualInputs };
 })();
