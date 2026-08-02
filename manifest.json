@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "秋招网申自动填充助手",
   "short_name": "网申自动填充",
-  "version": "1.12.7",
+  "version": "1.12.9",
   "description": "纯本地秋招网申自动填充、简历解析入库与投递台账管理工具。所有数据仅保存在本机浏览器，全程无任何对外网络请求。",
   "minimum_chrome_version": "102",
   "permissions": [
