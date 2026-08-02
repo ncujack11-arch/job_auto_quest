@@ -215,6 +215,23 @@
         'post': 'intent.targetPosition', 'expectCity': 'intent.targetCity',
       },
     },
+    {
+      id: 'rule_moka', siteName: 'MOKA招聘系统', host: 'mokahr.com', builtin: true, enabled: true,
+      mapping: {
+        'name': 'basic.name', 'candidateName': 'basic.name', 'realName': 'basic.name',
+        'mobile': 'basic.phone', 'phone': 'basic.phone', 'telephone': 'basic.phone',
+        'email': 'basic.email', 'gender': 'basic.gender', 'birthday': 'basic.birthday',
+        'idCard': 'basic.idCard', 'id_card': 'basic.idCard', 'nativePlace': 'basic.nativePlace',
+        'currentCity': 'basic.currentLocation', 'city': 'basic.currentLocation',
+        'school': 'education[0].school', 'schoolName': 'education[0].school', 'degree': 'education[0].degree',
+        'major': 'education[0].major', 'majorName': 'education[0].major', 'graduateTime': 'education[0].eduEnd',
+        'graduationTime': 'education[0].eduEnd', 'gpa': 'education[0].gpa',
+        'expectedPosition': 'intent.targetPosition', 'expectPosition': 'intent.targetPosition',
+        'jobName': 'intent.targetPosition', 'expectedCity': 'intent.targetCity',
+        'expectSalary': 'intent.expectedSalary', 'expectedSalary': 'intent.expectedSalary',
+        'entryTime': 'intent.availableDate', 'availability': 'intent.availableDate',
+      },
+    },
   ];
 
   async function get(key, fallback) {

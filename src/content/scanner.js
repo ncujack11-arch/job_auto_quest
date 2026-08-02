@@ -81,11 +81,13 @@
       if (el.tagName !== 'INPUT') return;
       const t = (el.type || 'text').toLowerCase();
       if (SKIP_TYPES.includes(t)) return;
-      if (!isVisibleEl(el) || el.disabled || el.readOnly) return;
+      if (!isVisibleEl(el) || el.disabled) return;
+      // 原生只读字段跳过; 但带 placeholder 的只读组件(如 MOKA 自定义下拉)仍需处理
+      if (el.readOnly && !el.placeholder) return;
       if (!inFormLikeContext(el)) return;
       if (TEXT_TYPES.includes(t)) {
         if (t === 'password') return; // 绝不处理密码框
-        handle(el, 'text', { inputType: t });
+        handle(el, 'text', { inputType: t, readonlyComponent: !!el.readOnly });
       } else if (DATE_TYPES.includes(t)) {
         handle(el, 'date', { inputType: t });
       } else if (t === 'file') {

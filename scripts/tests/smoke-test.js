@@ -161,6 +161,23 @@ function t(name, cond) {
   const impJ = AS.apps.importRecords(JSON.stringify({ records: [{ company: '华为', position: '算法工程师', city: '东莞' }] }), { format: 'json' });
   t('JSON 导入', impJ.records.length === 1 && impJ.records[0].company === '华为');
 
+  console.log('== matcher: MOKA 等自研系统(标签在父容器文本/无label/无placeholder) ==');
+  const mkMoka = (o) => Object.assign({ tag: 'input', type: 'text', name: '15923823390642', id: '', placeholder: '', ariaLabel: '', dataTexts: [], labelText: '', rowText: '', prevText: '' }, o);
+  const moka1 = AS.matcher.matchField(mkMoka({ rowText: '姓名*请输入姓名' }), null);
+  t('MOKA: 行文本前缀"姓名" → basic.name', moka1 && moka1.fieldKey === 'basic.name');
+  const moka2 = AS.matcher.matchField(mkMoka({ rowText: '手机号码', placeholder: '请输入手机号' }), null);
+  t('MOKA: 行文本"手机号码" → basic.phone', moka2 && moka2.fieldKey === 'basic.phone');
+  const moka3 = AS.matcher.matchField(mkMoka({ rowText: '毕业时间' }), null);
+  t('MOKA: 行文本"毕业时间" → education.eduEnd', moka3 && moka3.fieldKey === 'education.eduEnd');
+  const moka4 = AS.matcher.matchField(mkMoka({ rowText: '期望城市' }), null);
+  t('MOKA: 行文本"期望城市" → intent.targetCity', moka4 && moka4.fieldKey === 'intent.targetCity');
+  const moka5 = AS.matcher.matchField(mkMoka({ rowText: '最高学历' }), null);
+  t('MOKA: 行文本"最高学历" → education.degree', moka5 && moka5.fieldKey === 'education.degree');
+  // MOKA 规则映射
+  const mokaRule = { mapping: { 'candidateName': 'basic.name', 'mobile': 'basic.phone', 'graduationTime': 'education[0].eduEnd' } };
+  const moka6 = AS.matcher.matchField(mkMoka({ name: 'mobile', rowText: '手机号' }), mokaRule);
+  t('MOKA 规则: name=mobile → basic.phone', moka6 && moka6.fieldKey === 'basic.phone');
+
   console.log('== parser v1.7: 清洗/名录/置信度/来源/模板 ==');
   const dirty = [
     '姓名: 王五', '电话: 13712345678', 'www.resume-site.com', '1', '第 2 页',

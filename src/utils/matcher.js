@@ -177,9 +177,11 @@
       if (!def.kw || !def.kw.length) continue;
       let score = 0;
       const hits = [];
+      // 标签来源: labelText 优先; 缺失时从行文本前缀提取(MOKA/自研系统标签在父容器文本, 如 "姓名*请输入姓名")
+      const effectiveLabel = ctx.labelText || (ctx.rowText ? String(ctx.rowText).split(/[\s*:：|｜]/)[0].slice(0, 12) : '');
       // labelText 优先: 命中关键词越长越具体, 权重越高
-      if (ctx.labelText) {
-        const nl = fz.normalize(ctx.labelText);
+      if (effectiveLabel) {
+        const nl = fz.normalize(effectiveLabel);
         let bestKwLen = 0;
         for (const k of def.kw) {
           const nk = fz.normalize(k);
@@ -187,7 +189,7 @@
         }
         if (bestKwLen) {
           score += Math.min(10, 3 + bestKwLen * 1.2);
-          hits.push('label');
+          hits.push(ctx.labelText ? 'label' : 'row-label');
           // label 与字段名完全一致时再加权, 解决同分冲突
           if (nl === fz.normalize(def.label)) score += 4;
         }

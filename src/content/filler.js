@@ -246,7 +246,10 @@
       return { ok: false, action: 'info', detail: '未配置证件照, 需手动上传' };
     }
     if (el.disabled) return { ok: false, action: 'skipped', detail: '字段禁用' };
-    if (el.readOnly && type !== 'select') return { ok: false, action: 'skipped', detail: '只读字段' };
+    // 只读组件(如 MOKA 自定义下拉): 走组件点击路径, 不当作普通只读跳过
+    if (el.readOnly && type !== 'select' && !field.readonlyComponent) {
+      return { ok: false, action: 'skipped', detail: '只读字段' };
+    }
 
     const hasValue = type === 'checkbox' ? el.checked : !!(el.value && String(el.value).trim());
     if (hasValue && o.conflictMode !== 'overwrite') {
@@ -256,6 +259,18 @@
     try {
       switch (type) {
         case 'text': {
+          // 只读组件(自定义下拉/日期组件): 尝试弹层点击 + 输入
+          if (el.readOnly) {
+            const ok = await fillCustom(el, el, value);
+            if (ok) return { ok: true, action: 'filled', detail: '组件选择完成' };
+            // 兜底: 直接写值并触发事件(部分框架可接受)
+            try {
+              setNativeValue(el, String(value));
+              return { ok: true, action: 'filled' };
+            } catch (e) {
+              return { ok: false, action: 'unmatched', detail: '只读组件无法写入' };
+            }
+          }
           // 验证码字段绝不填充
           if (/(验证码|图形码|校验码|captcha|verify)/i.test(((el.placeholder || '') + ' ' + (el.name || '') + ' ' + (el.className || '')).replace(/(滑块|滑动)/g, ''))) {
             return { ok: false, action: 'info', detail: '验证码字段, 请手动填写' };
