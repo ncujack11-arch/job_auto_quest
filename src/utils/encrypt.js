@@ -85,6 +85,11 @@
     return decryptString(sessionKey, value);
   }
 
+  async function encryptWithSession(value) {
+    if (!sessionKey) throw new Error('未解锁');
+    return encryptString(sessionKey, value);
+  }
+
   function clearSessionKey() { sessionKey = null; }
 
   // 深度解密(用于解锁后填充/重加密)
@@ -109,6 +114,6 @@
   AS.encrypt = {
     ENC_PREFIX, isEncrypted, sha256Hex, deriveKey,
     encryptString, decryptString, deepDecrypt,
-    unlock, hasKey, decryptWithSession, clearSessionKey,
+    unlock, hasKey, decryptWithSession, encryptWithSession, clearSessionKey,
   };
 })();

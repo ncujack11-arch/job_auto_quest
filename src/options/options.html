@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>秋招网申自动填充助手 - 配置页</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="../assets/icons/icon48.png" alt="">
+      <div>
+        <b>秋招网申自动填充</b>
+        <span id="verLabel">v1.2.0</span>
+      </div>
+    </div>
+    <nav id="nav">
+      <a href="#/profile" data-view="profile">📥 信息库</a>
+      <a href="#/resume" data-view="resume">📄 简历导入</a>
+      <a href="#/applications" data-view="applications">🗂 投递台账</a>
+      <a href="#/questions" data-view="questions">📝 开放题库</a>
+      <a href="#/rules" data-view="rules">🌐 站点规则</a>
+      <a href="#/stats" data-view="stats">📊 统计看板</a>
+      <a href="#/settings" data-view="settings">⚙️ 设置</a>
+    </nav>
+    <div class="sidebar-foot">
+      <span>🔒 纯本地运行</span>
+      <span>零网络请求 · 数据不离开本机</span>
+    </div>
+  </aside>
+
+  <main id="view" class="main"></main>
+
+  <!-- 核心模块 (按依赖顺序) -->
+  <script src="../utils/logger.js"></script>
+  <script src="../modules/schema.js"></script>
+  <script src="../modules/storage.js"></script>
+  <script src="../utils/fuzzy.js"></script>
+  <script src="../utils/dates.js"></script>
+  <script src="../utils/matcher.js"></script>
+  <script src="../utils/encrypt.js"></script>
+  <script src="../modules/applications.js"></script>
+  <script src="../modules/reminders.js"></script>
+  <script src="../modules/stats.js"></script>
+
+  <!-- 视图 -->
+  <script src="charts.js"></script>
+  <script src="views/profile-view.js"></script>
+  <script src="views/rules-view.js"></script>
+  <script src="views/settings-view.js"></script>
+  <script src="views/resume-view.js"></script>
+  <script src="views/apps-view.js"></script>
+  <script src="views/questions-view.js"></script>
+  <script src="views/stats-view.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

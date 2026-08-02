@@ -172,6 +172,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         .catch((e) => sendResponse({ error: e.message || String(e) }));
       return true;
 
+    case 'AF_ENCRYPT':
+      // 会话内加密(保存敏感字段)
+      AS.encrypt.encryptWithSession(msg.value).then((v) => sendResponse({ value: v }))
+        .catch((e) => sendResponse({ error: e.message || String(e) }));
+      return true;
+
+    case 'AF_LOCK':
+      AS.encrypt.clearSessionKey();
+      sendResponse({ ok: true });
+      break;
+
     case 'AF_SYNC_REMINDERS':
       AS.reminders.syncAlarms().then((n) => sendResponse({ scheduled: n }));
       return true;
