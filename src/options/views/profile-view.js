@@ -284,23 +284,18 @@
     toolbar.appendChild(descInput);
 
     toolbar.appendChild(UI().el('button', {
-      class: 'btn', text: '＋ 新建方案', onclick: () => {
-        const name = prompt('方案名称(如: 算法岗 / 腾讯定制版):', '新方案');
-        if (!name) return;
-        const p = newProfile(name);
-        p.data = emptyData();
-        AS.storage.saveProfile(p).then(async () => {
-          await AS.storage.saveSettings({ activeProfileId: p.id });
-          currentProfile = p;
-          dirty = false;
-          await render(containerRef);
-        });
-      },
+      class: 'btn', text: '＋ 新建方案', onclick: () => openNewProfileModal(),
     }));
     toolbar.appendChild(UI().el('button', {
-      class: 'btn', text: '✏ 重命名', onclick: () => {
+      class: 'btn', text: '✏ 重命名', onclick: async () => {
         const name = prompt('新的方案名称:', currentProfile.name);
-        if (name) { currentProfile.name = name; markDirty(); render(containerRef); }
+        if (!name || !name.trim()) return;
+        currentProfile.name = name.trim();
+        currentProfile.updatedAt = Date.now();
+        await AS.storage.saveProfile(currentProfile);
+        dirty = false;
+        UI().toast('已重命名', 'success');
+        await render(containerRef);
       },
     }));
     toolbar.appendChild(UI().el('button', {
@@ -323,6 +318,64 @@
       class: 'btn', text: '📋 复制视图', onclick: () => openCopyView(),
     }));
     return toolbar;
+  }
+
+  // ---------- 新建方案弹窗(支持从现有方案复制) ----------
+  async function openNewProfileModal() {
+    const profiles = await AS.storage.getProfiles();
+    const modal = UI().el('div', { class: 'modal-mask' }, [UI().el('div', { class: 'modal', style: 'width:min(480px,92vw)' }, [])]);
+    const box = modal.querySelector('.modal');
+    box.appendChild(UI().el('h2', { text: '新建信息方案' }));
+
+    const nameInput = UI().el('input', { type: 'text', placeholder: '方案名称(如: 算法岗 / 腾讯定制版)' });
+    const i1 = UI().el('div', { class: 'form-item' });
+    i1.appendChild(UI().el('label', { text: '方案名称 *' }));
+    i1.appendChild(nameInput);
+    box.appendChild(i1);
+
+    const copySel = UI().el('select');
+    copySel.appendChild(UI().el('option', { value: '', text: '— 空白方案(不复制)—' }));
+    profiles.forEach((p) => copySel.appendChild(UI().el('option', { value: p.id, text: p.name + (p.description ? ' — ' + p.description : '') })));
+    const i2 = UI().el('div', { class: 'form-item' });
+    i2.appendChild(UI().el('label', { text: '复制自(可在此基础上修改, 避免重复填写)' }));
+    i2.appendChild(copySel);
+    box.appendChild(i2);
+
+    box.appendChild(UI().el('div', { class: 'modal-foot' }, [
+      UI().el('button', { class: 'btn', text: '取消', onclick: () => modal.remove() }),
+      UI().el('button', {
+        class: 'btn primary', text: '创建方案', onclick: async () => {
+          const name = nameInput.value.trim();
+          if (!name) { UI().toast('请填写方案名称', 'error'); return; }
+          const p = newProfile(name);
+          const srcId = copySel.value;
+          if (srcId) {
+            const src = profiles.find((x) => x.id === srcId);
+            if (src && src.data) {
+              // 深拷贝来源方案数据(排除不可复制的开放题库? 开放题可跨方案共用, 复制保留)
+              p.data = JSON.parse(JSON.stringify(src.data || {}));
+              p.description = (src.description ? '复制自 ' + src.name : '');
+            }
+          }
+          if (!p.data || typeof p.data !== 'object') p.data = emptyData();
+          // 结构完整性
+          AS.schema.CATEGORIES.forEach((cat) => {
+            if (cat.repeatable && !Array.isArray(p.data[cat.id])) p.data[cat.id] = [];
+            if (!cat.repeatable && (!p.data[cat.id] || typeof p.data[cat.id] !== 'object')) p.data[cat.id] = {};
+          });
+          if (!Array.isArray(p.data.custom)) p.data.custom = [];
+          await AS.storage.saveProfile(p);
+          await AS.storage.saveSettings({ activeProfileId: p.id });
+          currentProfile = p;
+          dirty = false;
+          modal.remove();
+          UI().toast(srcId ? `已创建方案「${name}」(复制自 ${profiles.find((x) => x.id === srcId).name})` : `已创建空白方案「${name}」`, 'success');
+          await render(containerRef);
+        },
+      }),
+    ]));
+    document.body.appendChild(modal);
+    nameInput.focus();
   }
 
   // ---------- 复制视图: 只读展示 + 一键复制 ----------
@@ -477,6 +530,7 @@
 
   async function render(container, query) {
     containerRef = container;
+    container.innerHTML = ''; // 防止重复调用叠加(新建/切换方案等场景)
     dirty = false;
     const profiles = await AS.storage.getProfiles();
     if (!currentProfile) {
