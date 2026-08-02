@@ -360,6 +360,8 @@
     // 预览模式(手动)
     if (!isAuto && settings.previewMode && plan.items.length) {
       setFillState('waiting-preview', '等待在预览面板点击「确认填充」(如面板不可见将 120 秒后自动继续)');
+      // 明确提示: 预览面板在页面右下角, 需点击「确认填充」才会写入
+      safeToast('⚠ 预览面板已弹出(右下角), 请点击「确认填充」开始写入; 若面板不可见, 120 秒后自动按全部字段继续', 6000);
       // 保存确认回调: popup 可发送 AF_PREVIEW_CONFIRM 直接确认, 无需在页面点击
       window.__af_preview_confirm = (selectedSet) => {
         AS.fillEngine.executePlan(plan, selectedSet, opts, engineContext(report))
