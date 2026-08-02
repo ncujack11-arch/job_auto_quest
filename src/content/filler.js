@@ -169,17 +169,40 @@
     return false;
   }
 
+  // 证件照自动上传(DataTransfer 赋值, 部分站点受限则报 infos)
+  async function fillFileUpload(el, dataUrl) {
+    try {
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const file = new File([blob], 'photo.jpg', { type: blob.type || 'image/jpeg' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      el.files = dt.files;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // 主填充函数
-  // field: scanner 产出的字段; value: 字符串值; opts: {typing, typingMin, typingMax, conflictMode}
+  // field: scanner 产出的字段; value: 字符串值; opts: {typing, typingMin, typingMax, conflictMode, photoDataUrl}
   // 返回: {ok: bool, action: 'filled'|'skipped'|'info', detail}
   async function fillField(field, value, opts) {
     const o = opts || {};
     const el = field.el;
     const type = field.type;
 
-    // 文件框无法程序赋值
+    // 文件框: 已配置证件照则尝试自动上传
     if (type === 'file') {
-      return { ok: false, action: 'info', detail: '文件上传框需手动操作' };
+      if (o.photoDataUrl) {
+        const ok = await fillFileUpload(el, o.photoDataUrl);
+        return ok
+          ? { ok: true, action: 'filled', detail: '证件照已自动上传' }
+          : { ok: false, action: 'info', detail: '上传受限, 请手动上传证件照' };
+      }
+      return { ok: false, action: 'info', detail: '未配置证件照, 需手动上传' };
     }
     if (el.disabled) return { ok: false, action: 'skipped', detail: '字段禁用' };
     if (el.readOnly && type !== 'select') return { ok: false, action: 'skipped', detail: '只读字段' };
@@ -255,5 +278,5 @@
     }
   }
 
-  AS.filler = { fillField, setNativeValue, fillSelect, VALUE_ALIASES };
+  AS.filler = { fillField, setNativeValue, fillSelect, fillFileUpload, VALUE_ALIASES };
 })();

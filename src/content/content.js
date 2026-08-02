@@ -80,18 +80,31 @@
 
   // ---------- 匹配计划构建 ----------
   // 返回 { items: [{field, fieldKey, value, label, ctx}], valueQueues, seenFields }
-  function buildPlan(fields, profile, rule, memories, reuseActive, sections, valueQueues) {
+  // order: { catId: [entryIndex...] } 经历素材选择顺序; refCodes: 内推码库
+  function buildPlan(fields, profile, rule, memories, reuseActive, sections, valueQueues, order, refCodes) {
     const items = [];
     const seenFields = new Set();
     const getValues = (fieldKey) => {
       const key = fieldKey.replace(/\[\d+\]/g, '');
-      if (!valueQueues.has(key)) valueQueues.set(key, AS.matcher.resolveValues(profile, fieldKey));
+      if (!valueQueues.has(key)) {
+        let vals = AS.matcher.resolveValues(profile, fieldKey);
+        const catId = key.split('.')[0];
+        if (order && order[catId] && Array.isArray(order[catId])) {
+          vals = order[catId].map((idx) => vals[idx]).filter((v) => v !== undefined && v !== null && v !== '');
+        }
+        valueQueues.set(key, vals);
+      }
       return valueQueues.get(key);
     };
     const catAllowed = (fieldKey) => {
       if (!sections || !sections.length) return true;
       const catId = fieldKey.replace(/\[\d+\]/g, '').split('.')[0];
       return sections.includes(catId);
+    };
+    const matchRefCode = (list, host) => {
+      const h = String(host || '').toLowerCase();
+      const hit = (list || []).find((r) => r && r.host && h === r.host.toLowerCase());
+      return hit ? hit.code : '';
     };
 
     for (const field of fields) {
@@ -103,12 +116,19 @@
       let fieldKey = null;
       let value = null;
 
+      // 0) 内推码: 识别"内推码/推荐码"字段
+      if (!fieldKey && /(内推码|内推|推荐码|推荐人|referral|邀请码)/i.test(ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name)) {
+        const code = matchRefCode(refCodes, location.hostname);
+        if (code) { fieldKey = 'refCode'; value = code; }
+      }
       // 1) 选择器记忆: 同一域名二次填充优先精准选择器
-      const sel = AS.matcher.genSelector(field.el);
-      if (memories && sel && memories[sel]) {
-        const memKey = memories[sel];
-        const vals = getValues(memKey);
-        if (vals.length) { fieldKey = memKey; value = vals.shift(); }
+      if (!fieldKey) {
+        const sel = AS.matcher.genSelector(field.el);
+        if (memories && sel && memories[sel]) {
+          const memKey = memories[sel];
+          const vals = getValues(memKey);
+          if (vals.length) { fieldKey = memKey; value = vals.shift(); }
+        }
       }
       // 2) 复用投递
       if (!fieldKey && reuseActive) {
@@ -145,7 +165,7 @@
       if (!fieldKey || value === null || value === undefined) continue;
       if (!catAllowed(fieldKey)) continue;
       const label = ctx.labelText || ctx.placeholder || ctx.name || ctx.id || '未知字段';
-      items.push({ field, fieldKey, value, label, ctx, sel });
+      items.push({ field, fieldKey, value, label, ctx, sel: AS.matcher.genSelector(field.el) });
     }
     return { items, valueQueues, seenFields };
   }
@@ -217,13 +237,47 @@
     return null;
   }
 
+  // ---------- 多页表单: 查找"下一步"按钮(排除提交类) ----------
+  function findNextButton() {
+    try {
+      const els = document.querySelectorAll('button, a, input[type="button"], input[type="submit"]');
+      for (const el of els) {
+        const t = ((el.textContent || el.value || '')).trim();
+        if (!t || t.length > 14) continue;
+        if (/^(下一步|保存并下一步|保存并继续|下一页|继续填写|继续|下一部分|下一页继续)/.test(t) && !/提交|完成|报名|确认|投递|最后/.test(t)) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) return el;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+  // ---------- 多页自动下一步续填(用户开启, 绝不触碰提交按钮) ----------
+  async function autoNextLoop() {
+    for (let i = 0; i < 6; i++) {
+      const btn = findNextButton();
+      if (!btn) break;
+      const urlBefore = location.href;
+      const countBefore = document.querySelectorAll('input,textarea,select').length;
+      try { btn.click(); } catch (e) { break; }
+      await sleep(1500);
+      // 页面无变化(URL 与表单数量都未变)则停止, 避免死循环
+      const countAfter = document.querySelectorAll('input,textarea,select').length;
+      if (location.href === urlBefore && countAfter === countBefore) break;
+      // 续填新一页(无预览, 静默)
+      await doFill({ sections: null, auto: true });
+    }
+  }
 
   // ---------- 核心填充流程 ----------
   async function doFill(msg) {
     LOG().info('content', 'fill requested in', frameLabel(), frame());
     const t0 = Date.now();
     const sections = msg && msg.sections && msg.sections.length ? msg.sections : null;
+    const isAuto = !!(msg && msg.auto);
 
     const [settings, profile, rule, reuse, memories] = await Promise.all([
       AS.storage.getSettings(),
@@ -274,20 +328,36 @@
       typingMin: settings.typingMin || 30,
       typingMax: settings.typingMax || 120,
       conflictMode: settings.conflictMode || 'skip',
+      photoDataUrl: settings.photoDataUrl || '',
     };
 
     const valueQueues = new Map();
     const seenFields = new Set();
-    let plan = buildPlan(AS.scanner.scan(), profile, rule, memories, reuseActive, sections, valueQueues);
+
+    // 经历素材选择器(仅手动模式 + 预览开启时)
+    let expOrder = null;
+    if (!isAuto && settings.previewMode && hasMultiEntries(profile)) {
+      expOrder = await new Promise((resolve) => {
+        AS.overlay.showExperiencePicker(profile, resolve);
+      });
+      if (expOrder === undefined) {
+        // 面板被直接关闭: 视为取消本次填充
+        chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }).catch(() => {});
+        return;
+      }
+    }
+
+    let plan = buildPlan(AS.scanner.scan(), profile, rule, memories, reuseActive, sections, valueQueues, expOrder || null, settings.refCodes);
     plan.items.forEach((it) => seenFields.add(it.field.el));
 
-    const finish = async (snapshots) => {
+    const finish = async (snapshots, withPanel) => {
       LOG().info('content', 'fill done in ' + frameLabel(), { filled: report.filled, unmatched: report.unmatched, took: (Date.now() - t0) + 'ms' });
       try { await chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }); } catch (e) { /* noop */ }
       if (report.filled > 0 || report.skipped > 0) {
         setTimeout(() => AS.detect.arm(), 800);
       }
       if (reuseActive) AS.storage.clearReusePayload();
+      if (!withPanel) return;
       if (report.filled > 0) {
         AS.overlay.showSummary(report, snapshots && snapshots.length ? () => undoAll(snapshots) : null);
       } else if (report.unmatched > 0 || report.errors > 0) {
@@ -295,13 +365,14 @@
       }
     };
 
-    // 预览模式
-    if (settings.previewMode && plan.items.length) {
+    // 预览模式(手动)
+    if (!isAuto && settings.previewMode && plan.items.length) {
       AS.overlay.showPreview(plan.items, async (selectedSet) => {
         const snapshots = await executePlan(plan, selectedSet, opts, settings, report);
-        await finish(snapshots);
+        await finish(snapshots, true);
+        AS.overlay.ensureFloatBall();
+        if (settings.autoNext) autoNextLoop();
       }, () => {
-        // 取消预览: 空报告
         chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }).catch(() => {});
       });
       return;
@@ -325,7 +396,7 @@
       await sleep(700);
       const fresh = AS.scanner.scan().filter((f) => !seenFields.has(f.el));
       if (!fresh.length) break;
-      const extra = buildPlan(fresh, profile, rule, null, reuseActive, sections, valueQueues);
+      const extra = buildPlan(fresh, profile, rule, null, reuseActive, sections, valueQueues, null, settings.refCodes);
       extra.items.forEach((it) => seenFields.add(it.field.el));
       if (!extra.items.length) break;
       const extraSnaps = await executePlan(extra, null, opts, settings, report);
@@ -333,7 +404,17 @@
       rounds++;
     }
 
-    await finish(snapshots);
+    await finish(snapshots, !isAuto);
+    if (!isAuto) {
+      AS.overlay.ensureFloatBall();
+      if (settings.autoNext) autoNextLoop();
+    }
+  }
+
+  // 是否存在多条可选择的经历
+  function hasMultiEntries(profile) {
+    if (!profile || !profile.data) return false;
+    return ['education', 'internship', 'project'].some((c) => (profile.data[c] || []).length > 1);
   }
 
   // ---------- 页面信息抓取 ----------
@@ -498,6 +579,25 @@
     return items;
   }
 
+  // ---------- 右键选中文字存入题库 ----------
+  async function saveSelectionToQuiz(text) {
+    const promptText = text.length > 60 ? text.slice(0, 60) + '...' : text;
+    const question = window.prompt('选中文字将存入开放题库。\n请输入问题标题(留空则用选中文字作为问题):\n\n选中内容: ' + promptText);
+    if (question === null) return;
+    try {
+      const profile = await AS.storage.getActiveProfile();
+      if (!profile) { AS.overlay.toast('无信息方案, 请先创建'); return; }
+      profile.data.openQuestions = profile.data.openQuestions || [];
+      const q = question.trim() || text.slice(0, 40);
+      profile.data.openQuestions.push({ question: q, answer: text });
+      profile.updatedAt = Date.now();
+      await AS.storage.saveProfile(profile);
+      AS.overlay.toast('已存入开放题库 ✔');
+    } catch (e) {
+      AS.overlay.toast('保存失败: ' + (e.message || e));
+    }
+  }
+
   // ---------- 消息路由 ----------
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || typeof msg !== 'object') return;
@@ -512,6 +612,17 @@
       case 'AF_SHOW_RECORD':
         if (window.top === window) {
           setTimeout(() => AS.overlay.showRecordPanel(msg.info || {}), 200);
+        }
+        break;
+      case 'AF_SHOW_FLOAT':
+        if (window.top === window) {
+          AS.overlay.ensureFloatBall();
+          AS.overlay.toast('悬浮操作面板已显示 (可拖拽)');
+        }
+        break;
+      case 'AF_SAVE_SELECTION':
+        if (window.top === window && msg.text && msg.text.trim()) {
+          saveSelectionToQuiz(msg.text.trim());
         }
         break;
       case 'AF_SCAN_COUNT': {

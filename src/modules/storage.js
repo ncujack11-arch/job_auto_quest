@@ -30,6 +30,9 @@
     typingMax: 120,
     previewMode: true,           // 填充前预览确认
     siteFilter: { mode: 'all', blacklist: [], whitelist: [] },  // 域名黑白名单
+    autoNext: false,             // 多页表单自动下一步续填(默认关, 绝不自动提交)
+    photoDataUrl: '',            // 证件照 dataURL(可选, 用于自动上传)
+    refCodes: [],                // 内推码库 [{host, code}]
     logLevel: 'info',
     encryption: { enabled: false, salt: '', iterations: 100000, passwordHash: '', hint: '' },
   };

@@ -42,6 +42,21 @@ function ensureMenus() {
         title: '记录本次投递',
         contexts: ['all'],
       });
+      chrome.contextMenus.create({
+        id: 'af-show-panel',
+        title: '显示悬浮操作面板',
+        contexts: ['all'],
+      });
+      chrome.contextMenus.create({
+        id: 'af-capture-selection',
+        title: '将选中文字存入开放题库',
+        contexts: ['selection'],
+      });
+      chrome.contextMenus.create({
+        id: 'af-open-options',
+        title: '打开插件配置页',
+        contexts: ['all'],
+      });
     });
   } catch (e) {
     LOG.warn('bg', 'menus failed', e);
@@ -170,6 +185,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
     }
 
+    case 'AF_FILL_SECTIONS': {
+      getActiveTab().then((tab) => {
+        if (tab) chrome.tabs.sendMessage(tab.id, { type: 'AF_FILL', sections: msg.sections || [] }).catch(() => {});
+      });
+      break;
+    }
+
+    case 'AF_RECORD_NOW': {
+      getActiveTab().then((tab) => {
+        if (!tab || !isHttpTab(tab)) return;
+        onSubmissionDetected(tab, {});
+      });
+      break;
+    }
+
     case 'AF_LEARN_SAVE':
       AS.storage.getActiveProfile().then(async (profile) => {
         if (!profile) return sendResponse({ saved: 0, error: '无信息方案' });
@@ -286,6 +316,16 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
     if (isHttpTab(tab)) {
       onSubmissionDetected(tab, {});
     }
+  } else if (info.menuItemId === 'af-show-panel') {
+    if (isHttpTab(tab)) {
+      chrome.tabs.sendMessage(tab.id, { type: 'AF_SHOW_FLOAT' }).catch(() => {});
+    }
+  } else if (info.menuItemId === 'af-capture-selection') {
+    if (isHttpTab(tab)) {
+      chrome.tabs.sendMessage(tab.id, { type: 'AF_SAVE_SELECTION', text: info.selectionText || '' }).catch(() => {});
+    }
+  } else if (info.menuItemId === 'af-open-options') {
+    chrome.runtime.openOptionsPage();
   }
 });
 

@@ -354,6 +354,133 @@
     card.appendChild(wrap);
   }
 
+  // ---------- 自动下一步 / 证件照 / 内推码 ----------
+  function renderAdvanced(card) {
+    card.appendChild(UI().el('h3', { text: '进阶功能' }));
+
+    // 自动下一步
+    const autoItem = UI().el('div', { class: 'form-item', style: 'max-width:520px' });
+    autoItem.appendChild(UI().el('label', { text: '多页表单自动下一步(SPA/分步网申)' }));
+    const aWrap = UI().el('div', { style: 'display:flex;gap:8px;align-items:center' });
+    const aCheck = UI().el('input', {
+      type: 'checkbox', checked: !!settings.autoNext,
+      onchange: async (e) => {
+        settings.autoNext = e.target.checked;
+        await AS.storage.saveSettings(settings);
+      },
+    });
+    aWrap.appendChild(aCheck);
+    aWrap.appendChild(UI().el('span', { style: 'font-size:12px;color:#6b7280', text: '填充后自动点击「下一步」并续填下一页, 到达提交页或页面无变化时停止(插件绝不会点击提交/完成按钮)' }));
+    autoItem.appendChild(aWrap);
+    card.appendChild(autoItem);
+
+    // 证件照
+    const photoItem = UI().el('div', { class: 'form-item', style: 'max-width:520px;margin-top:14px' });
+    photoItem.appendChild(UI().el('label', { text: '证件照(本地存储, 用于网申上传照片控件自动上传)' }));
+    const pWrap = UI().el('div', { style: 'display:flex;gap:10px;align-items:center' });
+    const preview = UI().el('img', { style: 'width:56px;height:56px;border-radius:8px;border:1px solid #e2e8f0;object-fit:cover' });
+    const photoInput = UI().el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+    const statusTxt = UI().el('span', { style: 'font-size:12px;color:#6b7280' });
+    const updatePhoto = () => {
+      if (settings.photoDataUrl) {
+        preview.src = settings.photoDataUrl;
+        statusTxt.textContent = '已配置 ✓';
+      } else {
+        preview.removeAttribute('src');
+        statusTxt.textContent = '未配置';
+      }
+    };
+    updatePhoto();
+    photoInput.addEventListener('change', async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      try {
+        const dataUrl = await compressImage(f, 420, 0.82);
+        settings.photoDataUrl = dataUrl;
+        await AS.storage.saveSettings(settings);
+        updatePhoto();
+        UI().toast('证件照已保存(仅存本地)', 'success');
+      } catch (err) {
+        UI().toast('图片处理失败: ' + err.message, 'error');
+      }
+    });
+    pWrap.appendChild(preview);
+    pWrap.appendChild(UI().el('button', { class: 'btn sm', text: settings.photoDataUrl ? '更换照片' : '上传照片', onclick: () => photoInput.click() }));
+    pWrap.appendChild(statusTxt);
+    if (settings.photoDataUrl) {
+      pWrap.appendChild(UI().el('button', { class: 'btn sm danger', text: '移除', onclick: async () => {
+        settings.photoDataUrl = '';
+        await AS.storage.saveSettings(settings);
+        updatePhoto();
+      } }));
+    }
+    photoItem.appendChild(pWrap);
+    photoItem.appendChild(photoInput);
+    card.appendChild(photoItem);
+
+    // 内推码库
+    const refItem = UI().el('div', { class: 'form-item', style: 'max-width:520px;margin-top:14px' });
+    refItem.appendChild(UI().el('label', { text: '内推码库(自动填入"内推码"字段, 按站点域名匹配)' }));
+    const refWrap = UI().el('div', { style: 'margin-top:6px' });
+    const renderRefs = () => {
+      refWrap.innerHTML = '';
+      (settings.refCodes || []).forEach((r, i) => {
+        const row = UI().el('div', { style: 'display:flex;gap:8px;margin-bottom:6px;align-items:center' });
+        row.appendChild(UI().el('span', { style: 'font-size:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px', text: `${r.host} → ${r.code}` }));
+        row.appendChild(UI().el('button', {
+          class: 'btn sm danger', text: '删', onclick: async () => {
+            settings.refCodes.splice(i, 1);
+            await AS.storage.saveSettings(settings);
+            renderRefs();
+          },
+        }));
+        refWrap.appendChild(row);
+      });
+      const addRow = UI().el('div', { style: 'display:flex;gap:8px' });
+      const hostI = UI().el('input', { type: 'text', placeholder: '站点域名(如 company.com)', style: 'flex:1;padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px' });
+      const codeI = UI().el('input', { type: 'text', placeholder: '内推码', style: 'width:140px;padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px' });
+      const addB = UI().el('button', {
+        class: 'btn sm', text: '添加', onclick: async () => {
+          if (!hostI.value.trim() || !codeI.value.trim()) return UI().toast('请填写域名与内推码', 'error');
+          settings.refCodes = settings.refCodes || [];
+          settings.refCodes.push({ host: hostI.value.trim(), code: codeI.value.trim() });
+          await AS.storage.saveSettings(settings);
+          renderRefs();
+        },
+      });
+      addRow.appendChild(hostI);
+      addRow.appendChild(codeI);
+      addRow.appendChild(addB);
+      refWrap.appendChild(addRow);
+    };
+    renderRefs();
+    refItem.appendChild(refWrap);
+    card.appendChild(refItem);
+  }
+
+  // 图片压缩为 dataURL
+  function compressImage(file, maxSize, quality) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = () => reject(new Error('图片无法读取'));
+        img.src = reader.result;
+      };
+      reader.onerror = () => reject(new Error('文件读取失败'));
+      reader.readAsDataURL(file);
+    });
+  }
+
   function renderBackup(card) {
     card.appendChild(UI().el('h3', { text: '数据备份与恢复' }));
     card.appendChild(UI().el('p', { class: 'view-sub', style: 'margin-bottom:12px', text: '导出全量数据(信息库/台账/规则/设置)为 JSON 备份文件, 可换设备、换浏览器恢复。' }));
@@ -447,6 +574,8 @@
     renderMemories(cMem);
     const cFlow = UI().el('div', { class: 'card' });
     renderStatusFlow(cFlow);
+    const cAdv = UI().el('div', { class: 'card' });
+    renderAdvanced(cAdv);
     const c2 = UI().el('div', { class: 'card' });
     renderEncryption(c2);
     const c3 = UI().el('div', { class: 'card' });
