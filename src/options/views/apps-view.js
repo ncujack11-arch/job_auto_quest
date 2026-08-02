@@ -1,9 +1,547 @@
-﻿(function () {
-  "use strict";
+﻿/**
+ * apps-view.js — 投递台账管理视图 (v1.2.0)
+ * 列表总览 / 多维筛选 / 搜索 / 进度快捷切换 / 时间线 / 批量操作 / 标签 / 提醒 / 跨模块联动
+ */
+(function () {
+  'use strict';
   const AS = window.AS;
   const UI = () => AS.optionsUI;
-  const PLACEHOLDER = { title: "投递台账", name: "applications" };
-  async function render(container) { container.innerHTML = ""; container.appendChild(UI().el("div", { class: "empty" }, [ UI().el("b", { text: "投递台账功能即将上线" }), UI().el("span", { text: "v1.2.0 将支持投递记录自动抓取、进度追踪与统计复盘" }) ])); }
+
+  let records = [];
+  let statusFlow = [];
+  let profiles = [];
+  let filters = { keyword: '', status: '', category: '', channel: '', tag: '' };
+  let selected = new Set();
+  let containerRef = null;
+  let editingId = null;
+
+  const STATUS_COLOR = {
+    '待笔试': 'pill warn', '笔试中': 'pill warn', '一面': 'pill primary', '二面': 'pill primary',
+    '终面': 'pill primary', 'HR面': 'pill primary', 'OC': 'pill primary', 'Offer': 'pill success',
+    '已回绝': 'pill danger', '流程终止': 'pill muted',
+  };
+
+  async function reload() {
+    [records, statusFlow, profiles] = await Promise.all([
+      AS.storage.getApplications(),
+      AS.storage.getStatusFlow(),
+      AS.storage.getProfiles(),
+    ]);
+  }
+
+  function filtered() {
+    const kw = filters.keyword.trim().toLowerCase();
+    return records.filter((r) => {
+      if (filters.status && r.status !== filters.status) return false;
+      if (filters.category && r.category !== filters.category) return false;
+      if (filters.channel && r.channel !== filters.channel) return false;
+      if (filters.tag && !(r.tags || []).includes(filters.tag)) return false;
+      if (kw) {
+        const hay = [r.company, r.position, r.category, r.city, r.channel, r.url, r.industry, (r.notes && r.notes.content) || '', (r.tags || []).join(' ')].join(' ').toLowerCase();
+        if (!hay.includes(kw)) return false;
+      }
+      return true;
+    });
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return '-';
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
+  function appliedTime(r) {
+    const t = (r.timeline || []).find((e) => e.type === '投递');
+    return t ? t.time : r.createdAt;
+  }
+
+  function renderToolbar() {
+    const bar = UI().el('div', { class: 'toolbar' });
+    bar.appendChild(UI().el('span', { style: 'font-size:13px;color:#6b7280;white-space:nowrap', text: `共 ${records.length} 条投递` }));
+    const search = UI().el('input', {
+      type: 'search', placeholder: '搜索公司 / 岗位 / 关键词...', value: filters.keyword,
+      oninput: (e) => { filters.keyword = e.target.value; renderTable(); },
+    });
+    bar.appendChild(search);
+
+    const statusSel = UI().el('select', { onchange: (e) => { filters.status = e.target.value; renderTable(); } });
+    statusSel.appendChild(UI().el('option', { value: '', text: '全部状态' }));
+    statusFlow.forEach((s) => statusSel.appendChild(UI().el('option', { value: s, text: s })));
+    statusSel.value = filters.status;
+    bar.appendChild(statusSel);
+
+    const catSel = UI().el('select', { onchange: (e) => { filters.category = e.target.value; renderTable(); } });
+    catSel.appendChild(UI().el('option', { value: '', text: '全部类别' }));
+    [...new Set(records.map((r) => r.category).filter(Boolean))].forEach((c) => catSel.appendChild(UI().el('option', { value: c, text: c })));
+    catSel.value = filters.category;
+    bar.appendChild(catSel);
+
+    const chSel = UI().el('select', { onchange: (e) => { filters.channel = e.target.value; renderTable(); } });
+    chSel.appendChild(UI().el('option', { value: '', text: '全部渠道' }));
+    [...new Set(records.map((r) => r.channel).filter(Boolean))].forEach((c) => chSel.appendChild(UI().el('option', { value: c, text: c })));
+    chSel.value = filters.channel;
+    bar.appendChild(chSel);
+
+    const tagSel = UI().el('select', { onchange: (e) => { filters.tag = e.target.value; renderTable(); } });
+    tagSel.appendChild(UI().el('option', { value: '', text: '全部标签' }));
+    [...new Set(records.flatMap((r) => r.tags || []))].forEach((t) => tagSel.appendChild(UI().el('option', { value: t, text: '#' + t })));
+    tagSel.value = filters.tag;
+    bar.appendChild(tagSel);
+
+    bar.appendChild(UI().el('button', { class: 'btn primary', text: '＋ 新增投递', onclick: () => openDetail(null) }));
+    bar.appendChild(UI().el('button', {
+      class: 'btn', text: '📤 导出 CSV', onclick: () => {
+        const list = selected.size ? records.filter((r) => selected.has(r.id)) : filtered();
+        AS.apps.downloadCSV(list);
+        UI().toast('已导出 CSV', 'success');
+      },
+    }));
+    return bar;
+  }
+
+  function renderBatchBar() {
+    const bar = UI().el('div', { class: 'card', style: 'display:' + (selected.size ? 'flex' : 'none') + ';align-items:center;gap:10px;padding:12px 16px' });
+    bar.id = 'batchBar';
+    bar.appendChild(UI().el('b', { text: `已选 ${selected.size} 条` }));
+    const statusSel = UI().el('select', { style: 'padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px' });
+    statusSel.appendChild(UI().el('option', { value: '', text: '批量改状态...' }));
+    statusFlow.forEach((s) => statusSel.appendChild(UI().el('option', { value: s, text: s })));
+    statusSel.addEventListener('change', async (e) => {
+      if (!e.target.value) return;
+      await AS.storage.bulkUpdate([...selected], { status: e.target.value });
+      UI().toast(`已更新 ${selected.size} 条状态`, 'success');
+      selected.clear();
+      await reload(); renderAll();
+    });
+    bar.appendChild(statusSel);
+
+    bar.appendChild(UI().el('button', {
+      class: 'btn sm', text: '批量打标签', onclick: async () => {
+        const tag = prompt('输入标签(多个用逗号分隔):');
+        if (!tag) return;
+        const tags = tag.split(/[,，]/).map((t) => t.trim()).filter(Boolean);
+        for (const id of selected) {
+          const app = await AS.storage.getApplication(id);
+          if (app) {
+            app.tags = [...new Set([...(app.tags || []), ...tags])];
+            await AS.storage.upsertApplication(app);
+          }
+        }
+        UI().toast('标签已添加', 'success');
+        await reload(); renderAll();
+      },
+    }));
+    bar.appendChild(UI().el('button', {
+      class: 'btn sm danger', text: '批量删除', onclick: async () => {
+        if (!confirm(`确定删除选中的 ${selected.size} 条记录?`)) return;
+        await AS.storage.removeApplications([...selected]);
+        await removeRemindersFor([...selected]);
+        UI().toast('已删除', 'success');
+        selected.clear();
+        await reload(); renderAll();
+      },
+    }));
+    bar.appendChild(UI().el('button', {
+      class: 'btn sm', text: '批量导出', onclick: () => {
+        AS.apps.downloadCSV(records.filter((r) => selected.has(r.id)));
+        UI().toast('已导出', 'success');
+      },
+    }));
+    bar.appendChild(UI().el('button', { class: 'btn sm', text: '取消选择', onclick: () => { selected.clear(); renderAll(); } }));
+    return bar;
+  }
+
+  async function removeRemindersFor(ids) {
+    const list = await AS.storage.getReminders();
+    await AS.storage.saveReminders(list.filter((r) => !ids.includes(r.applicationId)));
+    chrome.runtime.sendMessage({ type: 'AF_SYNC_REMINDERS' });
+  }
+
+  function statusSelect(app, onChange) {
+    const sel = UI().el('select', {
+      class: 'status', style: 'padding:3px 6px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px',
+      onchange: async (e) => {
+        await AS.apps.setStatus(app.id, e.target.value);
+        UI().toast(`${app.company} → ${e.target.value}`, 'success');
+        await reload(); renderAll();
+      },
+    });
+    statusFlow.forEach((s) => sel.appendChild(UI().el('option', { value: s, text: s })));
+    sel.value = app.status;
+    return sel;
+  }
+
+  function renderTable() {
+    const wrap = document.getElementById('tableWrap');
+    const list = filtered().sort((a, b) => appliedTime(b) - appliedTime(a));
+    wrap.innerHTML = '';
+    if (!list.length) {
+      wrap.appendChild(UI().el('div', { class: 'empty' }, [
+        UI().el('b', { text: '暂无投递记录' }),
+        UI().el('span', { text: '填充后提交成功会自动弹出记录面板, 也可点击「新增投递」手动添加' }),
+      ]));
+      return;
+    }
+    const table = UI().el('table', { class: 'list' });
+    const thead = UI().el('thead', {}, [UI().el('tr', {}, [
+      UI().el('th', { style: 'width:30px' }),
+      UI().el('th', { text: '公司' }),
+      UI().el('th', { text: '岗位' }),
+      UI().el('th', { text: '类别' }),
+      UI().el('th', { text: '城市' }),
+      UI().el('th', { text: '渠道' }),
+      UI().el('th', { text: '状态' }),
+      UI().el('th', { text: '投递时间' }),
+      UI().el('th', { text: '标签' }),
+      UI().el('th', { style: 'width:110px', text: '操作' }),
+    ])]);
+    const tbody = UI().el('tbody');
+    list.forEach((app) => {
+      const tr = UI().el('tr');
+      const cb = UI().el('input', {
+        type: 'checkbox', checked: selected.has(app.id),
+        onchange: (e) => {
+          if (e.target.checked) selected.add(app.id); else selected.delete(app.id);
+          renderBatchBar();
+        },
+      });
+      tr.appendChild(UI().el('td', {}, [cb]));
+      tr.appendChild(UI().el('td', { style: 'font-weight:500', text: app.company }));
+      tr.appendChild(UI().el('td', { text: app.position }));
+      tr.appendChild(UI().el('td', { text: app.category || '-' }));
+      tr.appendChild(UI().el('td', { text: app.city || '-' }));
+      tr.appendChild(UI().el('td', { text: app.channel || '-' }));
+      const st = UI().el('td', {}, [statusSelect(app)]);
+      tr.appendChild(st);
+      tr.appendChild(UI().el('td', { text: fmtTime(appliedTime(app)) }));
+      tr.appendChild(UI().el('td', {}, (app.tags || []).map((t) => UI().el('span', { class: 'tag', text: t }))));
+      const ops = UI().el('td', {}, [UI().el('div', { class: 'row-actions' }, [
+        UI().el('button', { class: 'link-btn', text: '详情', onclick: () => openDetail(app.id) }),
+        UI().el('button', { class: 'link-btn', text: '时间线', onclick: () => openTimeline(app.id) }),
+        UI().el('button', { class: 'link-btn danger', text: '删', onclick: async () => {
+          if (!confirm(`删除 ${app.company} ${app.position}?`)) return;
+          await AS.storage.removeApplications([app.id]);
+          await removeRemindersFor([app.id]);
+          selected.delete(app.id);
+          await reload(); renderAll();
+        } }),
+      ])]);
+      tr.appendChild(ops);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(thead);
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    renderBatchBar();
+  }
+
+  function renderAll() {
+    if (!containerRef) return;
+    containerRef.innerHTML = '';
+    containerRef.appendChild(renderToolbar());
+    containerRef.appendChild(renderBatchBar());
+    containerRef.appendChild(UI().el('div', { id: 'tableWrap' }));
+    renderTable();
+  }
+
+  // ---------- 详情弹窗 ----------
+  function openDetail(id) {
+    editingId = id;
+    const app = id ? records.find((r) => r.id === id) : AS.apps.newRecord();
+    if (!app) return;
+
+    const modal = UI().el('div', { class: 'modal-mask' }, [UI().el('div', { class: 'modal modal-xl' }, [])]);
+    const box = modal.querySelector('.modal');
+    const mk = (key, label, type, full) => {
+      const item = UI().el('div', { class: 'form-item' + (full ? ' full' : '') });
+      item.appendChild(UI().el('label', { text: label }));
+      const input = UI().el('input', { type: type || 'text' });
+      input.value = app[key] || '';
+      input.addEventListener('input', (e) => { app[key] = e.target.value; });
+      item.appendChild(input);
+      return item;
+    };
+    const mkText = (key, label) => {
+      const item = UI().el('div', { class: 'form-item full' });
+      item.appendChild(UI().el('label', { text: label }));
+      const ta = UI().el('textarea');
+      ta.value = app[key] || '';
+      ta.addEventListener('input', (e) => { app[key] = e.target.value; });
+      item.appendChild(ta);
+      return item;
+    };
+
+    // 基本信息
+    const c1 = UI().el('div', { class: 'card' });
+    c1.appendChild(UI().el('h3', { text: '基本信息' }));
+    c1.appendChild(UI().el('div', { class: 'form-grid' }, [
+      mk('company', '公司名称 *'), mk('position', '岗位名称 *'), mk('category', '岗位类别'),
+      mk('city', '工作城市'), mk('channel', '投递渠道'), mk('industry', '公司行业'),
+      mk('priority', '优先级'),
+      mk('salary', '薪资待遇'), mk('base', 'base 地点'), mk('contact', '联系人'),
+      mk('url', '岗位链接', 'url', true),
+      mkText('jdSnapshot', 'JD 快照'),
+      mkText('notes.content', '备注 / 复盘总记'),
+    ]));
+
+    // 状态与时间线
+    const c2 = UI().el('div', { class: 'card' });
+    const stRow = UI().el('div', { style: 'display:flex;align-items:center;gap:12px;margin-bottom:12px' });
+    stRow.appendChild(UI().el('label', { text: '当前状态:' }));
+    const stSel = UI().el('select', { style: 'padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px' });
+    statusFlow.forEach((s) => stSel.appendChild(UI().el('option', { value: s, text: s })));
+    stSel.value = app.status;
+    stSel.addEventListener('change', () => {
+      const prev = app.status;
+      app.status = stSel.value;
+      app.timeline = app.timeline || [];
+      if (prev !== app.status) app.timeline.push({ id: AS.apps.uid(), type: '状态变更', time: Date.now(), note: `${prev} → ${app.status}` });
+    });
+    stRow.appendChild(stSel);
+    c2.appendChild(stRow);
+
+    c2.appendChild(UI().el('h4', { style: 'font-size:13px;color:#475569;margin-bottom:8px', text: '完整时间线' }));
+    const tlWrap = UI().el('div', { class: 'timeline' });
+    const renderTL = () => {
+      tlWrap.innerHTML = '';
+      (app.timeline || []).slice().sort((a, b) => (a.time || 0) - (b.time || 0)).forEach((ev) => {
+        const item = UI().el('div', { class: 'tl-item' + (ev.type === '拒信' ? ' type-reject' : ev.type === 'Offer' ? ' type-offer' : '') });
+        item.appendChild(UI().el('div', { class: 'tl-time', text: fmtTime(ev.time) + ' · ' + ev.type }));
+        if (ev.note) item.appendChild(UI().el('div', { class: 'tl-note', text: ev.note }));
+        item.appendChild(UI().el('button', {
+          class: 'link-btn danger tl-del', text: '删除', onclick: async () => {
+            app.timeline = (app.timeline || []).filter((x) => x.id !== ev.id);
+            renderTL();
+          },
+        }));
+        tlWrap.appendChild(item);
+      });
+    };
+    renderTL();
+    c2.appendChild(tlWrap);
+
+    const addEventRow = UI().el('div', { class: 'form-grid', style: 'margin-top:10px' });
+    const typeSel = UI().el('select');
+    AS.apps.EVENT_TYPES.forEach((t) => typeSel.appendChild(UI().el('option', { value: t, text: t })));
+    const timeInput = UI().el('input', { type: 'datetime-local' });
+    timeInput.value = new Date().toISOString().slice(0, 16);
+    const noteInput = UI().el('input', { type: 'text', placeholder: '备注(选填)' });
+    const addBtn = UI().el('button', {
+      class: 'btn primary', text: '＋ 添加节点', onclick: () => {
+        app.timeline = app.timeline || [];
+        const t = timeInput.value ? new Date(timeInput.value).getTime() : Date.now();
+        app.timeline.push({ id: AS.apps.uid(), type: typeSel.value, time: t, note: noteInput.value.trim() });
+        noteInput.value = '';
+        renderTL();
+      },
+    });
+    addEventRow.appendChild(UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '节点类型' }), typeSel]));
+    addEventRow.appendChild(UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '时间' }), timeInput]));
+    addEventRow.appendChild(UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '备注' }), noteInput]));
+    addEventRow.appendChild(UI().el('div', { class: 'form-item', style: 'justify-content:flex-end' }, [addBtn]));
+    c2.appendChild(addEventRow);
+    c2.appendChild(UI().el('div', { class: 'form-item', style: 'margin-top:8px' }, [
+      UI().el('label', { text: '同步提醒(可选, 到点浏览器本地通知)' }),
+      UI().el('button', { class: 'btn sm', text: '＋ 添加提醒', onclick: () => {
+        if (!records.some((r) => r.id === app.id)) return UI().toast('请先保存该记录再添加提醒', 'error');
+        const label = prompt('提醒名称(如 一面 / 笔试):', '面试');
+        if (!label) return;
+        const t = prompt('提醒时间(格式: YYYY-MM-DD HH:MM):', '');
+        if (!t) return;
+        const ts = new Date(t.replace(' ', 'T')).getTime();
+        if (isNaN(ts)) return UI().toast('时间格式错误', 'error');
+        AS.reminders.upsert({ id: AS.reminders.uid(), applicationId: app.id, label, time: ts, notified: false }).then(() => {
+          chrome.runtime.sendMessage({ type: 'AF_SYNC_REMINDERS' });
+          renderReminderList();
+          UI().toast('提醒已添加', 'success');
+        });
+      } }),
+    ]));
+    const reminderList = UI().el('div', { class: 'form-item', style: 'margin-top:6px' });
+    const renderReminderList = async () => {
+      const list = await AS.storage.getReminders();
+      reminderList.innerHTML = '';
+      list.filter((r) => r.applicationId === app.id).forEach((r) => {
+        reminderList.appendChild(UI().el('div', { style: 'display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0' }, [
+          UI().el('span', { text: `⏰ ${r.label} · ${fmtTime(r.time)}${r.notified ? ' (已提醒)' : ''}` }),
+          UI().el('button', { class: 'link-btn danger', text: '删', onclick: async () => {
+            await AS.reminders.remove(r.id);
+            chrome.runtime.sendMessage({ type: 'AF_SYNC_REMINDERS' });
+            renderReminderList();
+          } }),
+        ]));
+      });
+    };
+    renderReminderList();
+    c2.appendChild(reminderList);
+
+    // 复盘面试
+    const c3 = UI().el('div', { class: 'card' });
+    c3.appendChild(UI().el('h3', { text: '笔面试复盘', children: [UI().el('span', { class: 'badge', text: '可一键同步至开放题库' })] }));
+    const ivWrap = UI().el('div');
+    const renderIV = () => {
+      ivWrap.innerHTML = '';
+      (app.interviews || []).forEach((iv, i) => {
+        const card = UI().el('div', { class: 'entry-card' });
+        card.appendChild(UI().el('div', { class: 'entry-head' }, [
+          UI().el('b', { text: `轮次 #${i + 1}: ${iv.round || '面试'}` }),
+          UI().el('button', { class: 'link-btn danger', text: '删除', onclick: () => { app.interviews.splice(i, 1); renderIV(); } }),
+        ]));
+        card.appendChild(UI().el('div', { class: 'form-grid' }, [
+          UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '轮次' }), (() => {
+            const s = UI().el('select');
+            ['一面', '二面', '终面', 'HR面', '笔试', 'OC沟通'].forEach((x) => s.appendChild(UI().el('option', { value: x, text: x })));
+            s.value = iv.round || '一面';
+            s.addEventListener('change', (e) => { iv.round = e.target.value; });
+            return s;
+          })()]),
+          UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '时间' }), (() => {
+            const d = UI().el('input', { type: 'datetime-local' });
+            d.value = iv.time ? new Date(iv.time).toISOString().slice(0, 16) : '';
+            d.addEventListener('change', (e) => { iv.time = new Date(e.target.value).getTime(); });
+            return d;
+          })()]),
+          UI().el('div', { class: 'form-item full' }, [UI().el('label', { text: '面试问题' }), (() => {
+            const d = UI().el('input', { type: 'text' });
+            d.value = iv.question || '';
+            d.addEventListener('input', (e) => { iv.question = e.target.value; });
+            return d;
+          })()]),
+          UI().el('div', { class: 'form-item full' }, [UI().el('label', { text: '回答 / 复盘' }), (() => {
+            const d = UI().el('textarea');
+            d.value = iv.answer || '';
+            d.addEventListener('input', (e) => { iv.answer = e.target.value; });
+            return d;
+          })()]),
+        ]));
+        ivWrap.appendChild(card);
+      });
+    };
+    renderIV();
+    c3.appendChild(ivWrap);
+    c3.appendChild(UI().el('button', {
+      class: 'add-entry-btn', text: '+ 添加一轮复盘', onclick: () => {
+        app.interviews = app.interviews || [];
+        app.interviews.push({ round: '一面', time: Date.now(), question: '', answer: '' });
+        renderIV();
+      },
+    }));
+    c3.appendChild(UI().el('div', { class: 'toolbar', style: 'margin-top:10px' }, [
+      UI().el('button', {
+        class: 'btn', text: '📥 同步面经至开放题库', onclick: async () => {
+          const profile = await AS.storage.getActiveProfile();
+          if (!profile) return UI().toast('无信息方案', 'error');
+          profile.data.openQuestions = profile.data.openQuestions || [];
+          let n = 0;
+          (app.interviews || []).forEach((iv) => {
+            if (iv.question && iv.answer) {
+              profile.data.openQuestions.push({
+                question: `【${app.company}】${iv.round}: ${iv.question}`,
+                answer: iv.answer,
+                tags: [app.company, iv.round],
+              });
+              n++;
+            }
+          });
+          if (n) { await AS.storage.saveProfile(profile); UI().toast(`已同步 ${n} 条面经到开放题库`, 'success'); }
+          else UI().toast('没有填写问题与答案的复盘', '');
+        },
+      }),
+    ]));
+
+    // 关联与复用
+    const c4 = UI().el('div', { class: 'card' });
+    c4.appendChild(UI().el('h3', { text: '跨模块联动' }));
+    const linkGrid = UI().el('div', { class: 'form-grid' });
+    const profSel = UI().el('select', { onchange: (e) => { app.profileId = e.target.value; } });
+    profSel.appendChild(UI().el('option', { value: '', text: '— 选择本次使用的信息方案 —' }));
+    profiles.forEach((p) => profSel.appendChild(UI().el('option', { value: p.id, text: p.name })));
+    profSel.value = app.profileId || '';
+    linkGrid.appendChild(UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '关联信息方案' }), profSel]));
+    linkGrid.appendChild(UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '简历版本描述' }), (() => {
+      const i = UI().el('input', { type: 'text', placeholder: '如: v2 技术岗简历' });
+      i.value = app.resumeVersion || '';
+      i.addEventListener('input', (e) => { app.resumeVersion = e.target.value; });
+      return i;
+    })()]));
+    linkGrid.appendChild(UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '标签(逗号分隔)' }), (() => {
+      const i = UI().el('input', { type: 'text' });
+      i.value = (app.tags || []).join(', ');
+      i.addEventListener('input', (e) => { app.tags = e.target.value.split(/[,，]/).map((t) => t.trim()).filter(Boolean); });
+      return i;
+    })()]));
+    c4.appendChild(linkGrid);
+    c4.appendChild(UI().el('div', { class: 'toolbar', style: 'margin-top:10px' }, [
+      UI().el('button', {
+        class: 'btn', text: '📖 回溯信息方案', onclick: () => {
+          location.hash = '#/profile';
+        },
+      }),
+      UI().el('button', {
+        class: 'btn primary', text: '🚀 一键复用投递同公司其他岗位', onclick: async () => {
+          if (!app.url) return UI().toast('该记录没有岗位链接', 'error');
+          await AS.storage.setReusePayload({
+            url: app.url,
+            company: app.company,
+            position: app.position,
+            createdAt: Date.now(),
+          });
+          UI().toast('已设置复用载荷, 打开岗位链接后按 Alt+Shift+F 自动填充公司/岗位', 'success');
+          window.open(app.url, '_blank');
+        },
+      }),
+    ]));
+
+    box.appendChild(c1);
+    box.appendChild(c2);
+    box.appendChild(c3);
+    box.appendChild(c4);
+
+    const foot = UI().el('div', { class: 'modal-foot' }, [
+      UI().el('button', { class: 'btn', text: '取消', onclick: () => modal.remove() }),
+      UI().el('button', {
+        class: 'btn primary', text: '💾 保存', onclick: async () => {
+          if (!app.company || !app.position) return UI().toast('公司名称与岗位名称为必填', 'error');
+          await AS.storage.upsertApplication(app);
+          modal.remove();
+          UI().toast('已保存', 'success');
+          await reload(); renderAll();
+        },
+      }),
+    ]);
+    box.appendChild(foot);
+    document.body.appendChild(modal);
+  }
+
+  // ---------- 时间线弹窗(只读时间线) ----------
+  function openTimeline(id) {
+    const app = records.find((r) => r.id === id);
+    if (!app) return;
+    const modal = UI().el('div', { class: 'modal-mask' }, [UI().el('div', { class: 'modal' }, [])]);
+    const box = modal.querySelector('.modal');
+    box.appendChild(UI().el('h2', { text: `${app.company} ${app.position} — 完整时间线` }));
+    const tl = UI().el('div', { class: 'timeline' });
+    (app.timeline || []).slice().sort((a, b) => (a.time || 0) - (b.time || 0)).forEach((ev) => {
+      const item = UI().el('div', { class: 'tl-item' + (ev.type === '拒信' ? ' type-reject' : ev.type === 'Offer' ? ' type-offer' : '') });
+      item.appendChild(UI().el('div', { class: 'tl-time', text: fmtTime(ev.time) + ' · ' + ev.type }));
+      if (ev.note) item.appendChild(UI().el('div', { class: 'tl-note', text: ev.note }));
+      tl.appendChild(item);
+    });
+    box.appendChild(tl);
+    box.appendChild(UI().el('div', { class: 'modal-foot' }, [UI().el('button', { class: 'btn', text: '关闭', onclick: () => modal.remove() })]));
+    document.body.appendChild(modal);
+  }
+
+  async function render(container, query) {
+    containerRef = container;
+    await reload();
+    if (query && query.focus) {
+      const target = records.find((r) => r.id === query.focus);
+      if (target) openDetail(target.id);
+    }
+    renderAll();
+  }
+
   AS.views = AS.views || {};
   AS.views.applications = render;
 })();

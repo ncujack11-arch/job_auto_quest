@@ -43,11 +43,19 @@
     LOG().info('content', 'fill requested in', frameLabel(), frame());
     const t0 = Date.now();
 
-    const [settings, profile, rule] = await Promise.all([
+    const [settings, profile, rule, reuse] = await Promise.all([
       AS.storage.getSettings(),
       AS.storage.getActiveProfile(),
       AS.storage.getSiteRuleForHost(location.hostname),
+      AS.storage.getReusePayload(),
     ]);
+
+    // 复用载荷: 仅当目标站点匹配时生效
+    let reuseActive = null;
+    if (reuse && reuse.url && reuse.url.indexOf(location.hostname) >= 0) {
+      reuseActive = reuse;
+      LOG().info('content', 'reuse payload active', reuse.company, reuse.position);
+    }
 
     const report = { filled: 0, skipped: 0, unmatched: 0, errors: 0, total: 0, unmatchedItems: [], infos: [] };
 
@@ -92,12 +100,22 @@
       let fieldKey = null;
       let value = null;
 
-      // 1) 开放性问题
-      if (AS.matcher.isOpenQuestionField(ctx)) {
+      // 1) 复用投递: 公司/岗位强制使用历史投递信息
+      if (reuseActive) {
+        if (AS.fuzzy.containsAny(ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id, ['公司名称', '公司', '单位名称', 'employer', 'company', 'organization'])) {
+          fieldKey = 'reuse.company';
+          value = reuseActive.company;
+        } else if (AS.fuzzy.containsAny(ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id, ['岗位', '职位', '应聘', 'position', 'job title', 'post'])) {
+          fieldKey = 'reuse.position';
+          value = reuseActive.position;
+        }
+      }
+      // 2) 开放性问题
+      if (!fieldKey && AS.matcher.isOpenQuestionField(ctx)) {
         const answer = AS.matcher.resolveOpenQuestion(profile, ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name);
         if (answer !== null) { fieldKey = 'openQuestions'; value = answer; }
       }
-      // 2) 站点映射 / 关键词匹配
+      // 3) 站点映射 / 关键词匹配
       if (!fieldKey) {
         const m = AS.matcher.matchField(ctx, rule);
         if (m) {
@@ -146,6 +164,10 @@
     // 联动: 开启投递完成检测
     if (report.filled > 0 || report.skipped > 0) {
       setTimeout(() => AS.detect.arm(), 800);
+    }
+    // 复用载荷使用完毕即清除
+    if (reuseActive) {
+      AS.storage.clearReusePayload();
     }
   }
 
