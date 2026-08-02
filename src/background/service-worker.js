@@ -306,12 +306,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const d = profile.data;
         const settings = await AS.storage.getSettings();
         let saved = 0;
+        let same = 0, locked = 0, skipped = 0;
         for (const it of msg.items || []) {
-          if (!it || it.value === undefined || it.value === null || String(it.value).trim() === '') continue;
+          if (!it || it.value === undefined || it.value === null || String(it.value).trim() === '') { skipped++; continue; }
           if (it.type === 'openQuestions') {
             d.openQuestions = d.openQuestions || [];
             const dup = d.openQuestions.some((q) => q.question === it.question && q.answer === it.answer);
             if (!dup) { d.openQuestions.push({ question: it.question || '开放题', answer: String(it.value).trim() }); saved++; }
+            else same++;
             continue;
           }
           if (it.type === 'custom') {
@@ -320,27 +322,29 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (!dup) {
               d.custom.push({ key: it.key || 'f' + Date.now().toString(36), label: it.label || '自定义', value: String(it.value).trim() });
               saved++;
-            }
+            } else same++;
             continue;
           }
           const base = String(it.fieldKey || '').replace(/\[\d+\]/g, '');
           const [catId, key] = base.split('.');
           const cat = AS.schema.findCategory(catId);
-          if (!cat || !key || cat.repeatable) continue;
+          if (!cat || !key || cat.repeatable) { skipped++; continue; }
           let val = String(it.value).trim();
           const def = AS.schema.getFieldDef(base);
           if (def && def.sensitive && settings.encryption && settings.encryption.enabled) {
             if (AS.encrypt.hasKey()) {
               try { val = await AS.encrypt.encryptWithSession(val); } catch (e) { LOG.error('bg', 'learn encrypt failed', e); }
             } else {
-              continue; // 加密未解锁, 跳过敏感字段
+              locked++; // 加密未解锁, 跳过敏感字段
+              continue;
             }
           }
           if (d[catId][key] !== val) { d[catId][key] = val; saved++; }
+          else same++;
         }
         if (saved) { profile.updatedAt = Date.now(); await AS.storage.saveProfile(profile); }
-        LOG.info('bg', 'learn saved', saved);
-        sendResponse({ saved });
+        LOG.info('bg', 'learn saved', saved, { same, locked, skipped });
+        sendResponse({ saved, same, locked, skipped });
       }).catch((e) => { LOG.error('bg', 'learn save failed', e); sendResponse({ saved: 0, error: e.message || String(e) }); });
       return true;
 

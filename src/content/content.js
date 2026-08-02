@@ -551,11 +551,16 @@
       if (!value) continue;
       const ctx = AS.matcher.buildContext(field.el);
 
-      // 开放题答案 → 题库
+      // 开放题答案 → 题库(与库去重: 已存在相同 问题+答案 则不收集)
       if (AS.matcher.isOpenQuestionField(ctx)) {
         const question = (ctx.labelText || ctx.placeholder || ctx.name || '开放题').slice(0, 60);
+        const answer = value;
+        const inLibrary = (profile.data.openQuestions || []).some((q) => q.question === question && q.answer === answer);
         const dupKey = 'oq|' + question + '|' + value;
-        if (!seen.has(dupKey)) { seen.add(dupKey); items.push({ type: 'openQuestions', question, answer: value, value }); }
+        if (!inLibrary && !seen.has(dupKey)) {
+          seen.add(dupKey);
+          items.push({ type: 'openQuestions', question, answer: value, value });
+        }
         continue;
       }
       const m = AS.matcher.matchField(ctx, rule);

@@ -269,8 +269,13 @@
     const text = `${ctx.labelText} ${ctx.placeholder} ${ctx.name} ${ctx.id}`;
     const fz = FUZZY();
     if (!text) return false;
-    if (/^.{2,}$/.test(fz.normalize(text)) && /(为什么|如何|怎样|怎么|请|评价|介绍|规划|看法|理解|描述|谈谈|describe|why|how)/i.test(text)) {
-      return !/(姓名|手机|邮箱|电话|地址|学校|公司)/.test(text);
+    const nt = fz.normalize(text);
+    if (nt.length < 2) return false;
+    // 明确个人信息标签(整段仅为字段名) → 不是开放题
+    if (/^(姓名|真实姓名|手机号|手机号码|联系电话|电话号码|联系手机|邮箱|电子邮箱|联系邮箱|家庭住址|通讯地址|户籍地址|证件号|身份证号|生日|出生日期|政治面貌|紧急联系人)$/.test(nt)) return false;
+    // 开放题关键词命中
+    if (/(为什么|如何|怎样|怎么|请|评价|介绍|规划|看法|理解|描述|谈谈|describe|why|how)/i.test(text)) {
+      return true;
     }
     return false;
   }

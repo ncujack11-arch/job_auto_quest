@@ -320,12 +320,16 @@
             try {
               const r = await chrome.runtime.sendMessage({ type: 'AF_LEARN_SAVE', items: chosen });
               if (r && r.saved > 0) {
-                toast(`已导入 ${r.saved} 项到信息库 ✔`);
+                toast(`已导入 ${r.saved} 项到信息库 ✔` + (r.same ? `, ${r.same} 项与库中相同` : ''));
                 closePanel();
                 onDone && onDone(r.saved);
               } else {
                 btn.disabled = false; btn.textContent = '导入所选';
-                toast(r && r.error ? '导入失败: ' + r.error : '没有可导入的新内容');
+                const reasons = [];
+                if (r && r.same) reasons.push(`${r.same} 项与信息库完全相同`);
+                if (r && r.locked) reasons.push(`${r.locked} 项为加密字段(需先在设置解锁)`);
+                if (r && r.error) reasons.push(r.error);
+                toast(reasons.length ? '无可导入: ' + reasons.join('; ') : '没有可导入的新内容');
               }
             } catch (e) {
               btn.disabled = false; btn.textContent = '导入所选';
