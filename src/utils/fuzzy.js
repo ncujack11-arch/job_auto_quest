@@ -1,9 +1,10 @@
-/**
+﻿/**
  * fuzzy.js — 字符串相似度与模糊匹配工具
  */
 (function () {
   'use strict';
-  const AS = (window.AS = window.AS || {});
+  const G = (typeof window !== 'undefined') ? window : globalThis;
+  const AS = (G.AS = G.AS || {});
   if (AS.fuzzy) return;
 
   // 归一化: 小写、全角转半角、去空白与常见干扰词

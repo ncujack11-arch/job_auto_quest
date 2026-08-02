@@ -1,10 +1,11 @@
-/**
+﻿/**
  * encrypt.js — 敏感字段可选加密 (WebCrypto AES-GCM + PBKDF2)
  * 密钥仅缓存在后台 Service Worker 内存中, 重启浏览器后需重新输入口令
  */
 (function () {
   'use strict';
-  const AS = (window.AS = window.AS || {});
+  const G = (typeof window !== 'undefined') ? window : globalThis;
+  const AS = (G.AS = G.AS || {});
   if (AS.encrypt) return;
 
   const ENC_PREFIX = 'enc:v1:';

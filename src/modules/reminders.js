@@ -1,10 +1,11 @@
-/**
+﻿/**
  * reminders.js — 本地日程提醒数据模型
  * 配合后台 chrome.alarms + notifications 实现本地推送
  */
 (function () {
   'use strict';
-  const AS = (window.AS = window.AS || {});
+  const G = (typeof window !== 'undefined') ? window : globalThis;
+  const AS = (G.AS = G.AS || {});
   if (AS.reminders) return;
 
   function uid() { return 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }

@@ -1,9 +1,10 @@
-/**
+﻿/**
  * applications.js — 投递台账数据模型与操作
  */
 (function () {
   'use strict';
-  const AS = (window.AS = window.AS || {});
+  const G = (typeof window !== 'undefined') ? window : globalThis;
+  const AS = (G.AS = G.AS || {});
   if (AS.apps) return;
 
   const DEFAULT_STATUS = ['待笔试', '笔试中', '一面', '二面', '终面', 'HR面', 'OC', 'Offer', '已回绝', '流程终止'];

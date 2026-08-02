@@ -1,11 +1,12 @@
-/**
+﻿/**
  * parser.js — 简历本地解析模块 (仅选项页使用)
  * PDF(pdf.js) / DOCX(mammoth) 全部本地解析, 不调用任何外部 API
  * 支持单栏/双栏排版容错 + 结构化提取 + 置信度标注
  */
 (function () {
   'use strict';
-  const AS = (window.AS = window.AS || {});
+  const G = (typeof window !== 'undefined') ? window : globalThis;
+  const AS = (G.AS = G.AS || {});
   if (AS.parser) return;
 
   const LOG = () => AS.logger;

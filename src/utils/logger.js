@@ -1,11 +1,12 @@
-/**
+﻿/**
  * logger.js — 分级日志输出
  * 全局命名空间: AS (AutoFill System)
  * 级别: debug < info < warn < error,可通过设置中的 logLevel 调整
  */
 (function () {
   'use strict';
-  const AS = (window.AS = window.AS || {});
+  const G = (typeof window !== 'undefined') ? window : globalThis;
+  const AS = (G.AS = G.AS || {});
   if (AS.logger) return;
 
   const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };

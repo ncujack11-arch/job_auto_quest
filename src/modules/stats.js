@@ -1,9 +1,10 @@
-/**
+﻿/**
  * stats.js — 投递数据统计与秋招复盘指标计算
  */
 (function () {
   'use strict';
-  const AS = (window.AS = window.AS || {});
+  const G = (typeof window !== 'undefined') ? window : globalThis;
+  const AS = (G.AS = G.AS || {});
   if (AS.stats) return;
 
   const TERMINAL_STATUS = ['已回绝', '流程终止'];

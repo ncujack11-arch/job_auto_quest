@@ -196,6 +196,61 @@
     }
   }
 
+  function renderStatusFlow(card) {
+    card.appendChild(UI().el('h3', { text: '进度状态流', children: [UI().el('span', { class: 'badge', text: '台账进度可选状态' })] }));
+    card.appendChild(UI().el('p', { class: 'view-sub', style: 'margin-bottom:12px', text: '预设标准状态流: 待笔试 → 笔试中 → 一面 → 二面 → 终面 → HR面 → OC → Offer → 已回绝 → 流程终止, 可自定义增删。' }));
+    const wrap = UI().el('div', { id: 'statusFlowList' });
+    const renderList = async () => {
+      const flow = await AS.storage.getStatusFlow();
+      wrap.innerHTML = '';
+      flow.forEach((s, i) => {
+        const row = UI().el('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:6px' });
+        row.appendChild(UI().el('span', { style: 'color:#9ca3af;font-size:12px', text: `${i + 1}.` }));
+        const input = UI().el('input', {
+          type: 'text', value: s, style: 'flex:1;max-width:260px;padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px',
+          onchange: async (e) => {
+            if (!e.target.value.trim()) return;
+            const f = await AS.storage.getStatusFlow();
+            f[i] = e.target.value.trim();
+            await AS.storage.saveStatusFlow(f);
+          },
+        });
+        row.appendChild(input);
+        row.appendChild(UI().el('button', {
+          class: 'btn sm danger', text: '删除', onclick: async () => {
+            if (flow.length <= 1) return UI().toast('至少保留一个状态', 'error');
+            const f = await AS.storage.getStatusFlow();
+            f.splice(i, 1);
+            await AS.storage.saveStatusFlow(f);
+            renderList();
+          },
+        }));
+        wrap.appendChild(row);
+      });
+      const addRow = UI().el('div', { style: 'margin-top:8px' });
+      addRow.appendChild(UI().el('button', {
+        class: 'btn sm', text: '＋ 新增状态', onclick: async () => {
+          const name = prompt('新状态名称(如: 已offer沟通):');
+          if (!name) return;
+          const f = await AS.storage.getStatusFlow();
+          f.push(name);
+          await AS.storage.saveStatusFlow(f);
+          renderList();
+        },
+      }));
+      addRow.appendChild(UI().el('button', {
+        class: 'btn sm', style: 'margin-left:8px', text: '恢复默认', onclick: async () => {
+          await AS.storage.saveStatusFlow(AS.storage.DEFAULT_STATUS_FLOW.slice());
+          renderList();
+          UI().toast('已恢复默认状态流', 'success');
+        },
+      }));
+      wrap.appendChild(addRow);
+    };
+    renderList();
+    card.appendChild(wrap);
+  }
+
   function renderBackup(card) {
     card.appendChild(UI().el('h3', { text: '数据备份与恢复' }));
     card.appendChild(UI().el('p', { class: 'view-sub', style: 'margin-bottom:12px', text: '导出全量数据(信息库/台账/规则/设置)为 JSON 备份文件, 可换设备、换浏览器恢复。' }));
@@ -283,6 +338,8 @@
 
     const c1 = UI().el('div', { class: 'card' });
     renderFillPolicy(c1);
+    const cFlow = UI().el('div', { class: 'card' });
+    renderStatusFlow(cFlow);
     const c2 = UI().el('div', { class: 'card' });
     renderEncryption(c2);
     const c3 = UI().el('div', { class: 'card' });

@@ -1,10 +1,11 @@
-/**
+﻿/**
  * storage.js — 数据访问层 (chrome.storage.local)
  * 所有数据仅存本地, 无任何网络请求
  */
 (function () {
   'use strict';
-  const AS = (window.AS = window.AS || {});
+  const G = (typeof window !== 'undefined') ? window : globalThis;
+  const AS = (G.AS = G.AS || {});
   if (AS.storage) return;
 
   const KEYS = {

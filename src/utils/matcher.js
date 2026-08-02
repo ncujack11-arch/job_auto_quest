@@ -1,10 +1,11 @@
-/**
+﻿/**
  * matcher.js — 表单字段识别与信息库字段匹配引擎
  * 多维度信号: label / name / placeholder / id / aria / data-* / 相邻文本
  */
 (function () {
   'use strict';
-  const AS = (window.AS = window.AS || {});
+  const G = (typeof window !== 'undefined') ? window : globalThis;
+  const AS = (G.AS = G.AS || {});
   if (AS.matcher) return;
 
   const FUZZY = () => AS.fuzzy;

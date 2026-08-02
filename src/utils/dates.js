@@ -1,10 +1,11 @@
-/**
+﻿/**
  * dates.js — 日期解析与格式自适应转换
  * 支持: YYYY-MM-DD / YYYY/MM/DD / YYYY.MM.DD / YYYY年MM月DD日 / MM/DD/YYYY / YYYY-MM / YYYY年MM月
  */
 (function () {
   'use strict';
-  const AS = (window.AS = window.AS || {});
+  const G = (typeof window !== 'undefined') ? window : globalThis;
+  const AS = (G.AS = G.AS || {});
   if (AS.dates) return;
 
   // 解析任意常见日期字符串 → {y, m, d} (m/d 可能为 0 表示未给出)
