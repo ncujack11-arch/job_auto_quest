@@ -516,8 +516,6 @@
     container.appendChild(formWrap);
     renderProfileForm(formWrap);
   }
-    renderProfileForm();
-  }
 
   AS.views = AS.views || {};
   AS.views.profile = render;
