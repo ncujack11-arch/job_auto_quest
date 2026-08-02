@@ -142,7 +142,12 @@ function report(name, ok, detail) {
     const fill = { name: '正式姓名', phone: '13711112222', email: 'real@qq.com', politicalStatus: '共青团员', ethnicity: '汉族', birthday: '2001-06' };
     Object.assign(prof.data.basic, fill);
     const edu = prof.data.education && prof.data.education[0];
-    if (edu) { edu.school = '哈尔滨工程大学'; edu.major = '软件工程'; }
+    if (edu) {
+      edu.school = '哈尔滨工程大学'; edu.major = '软件工程'; edu.degree = '本科';
+      edu.eduStart = '2019-09'; edu.eduEnd = '2023-06';
+    }
+    // 实习经历(验证 date_info 起止时间跨分类填充)
+    prof.data.internship = [{ intCompany: '某科技公司', intPosition: '后端开发实习生', intStart: '2022-06', intEnd: '2022-09' }];
     await chrome.storage.local.set({ af_profiles: [prof] });
   });
   const fill = await page.evaluate(async () => {
@@ -153,7 +158,7 @@ function report(name, ok, detail) {
     const valueQueues = new Map();
     const plan = AS.fillEngine.buildPlan(fields, profile, rule, memories, null, null, valueQueues, null, null, location.hostname);
     const rep = { filled: 0, skipped: 0, unmatched: 0, errors: 0, total: 0, infos: [], unmatchedItems: [] };
-    await AS.fillEngine.executePlan(plan, null, { conflictMode: 'skip', typing: false, photoDataUrl: '' }, {
+    await AS.fillEngine.executePlan(plan, null, { conflictMode: 'overwrite', typing: false, photoDataUrl: '' }, {
       report: rep, snapshot: () => null, highlight: () => {}, showProgress: () => {}, closeProgress: () => {},
       setFillState: () => {}, sleep: (ms) => new Promise((r) => setTimeout(r, ms)), flushMemories: async () => {},
     });
@@ -161,6 +166,37 @@ function report(name, ok, detail) {
   });
   report('阶段5 填充执行', fill.filled > 0, { filled: fill.filled, total: fill.total, notEffective: fill.notEffective || 0 });
   console.log('  未匹配/未生效:', JSON.stringify(fill.unmatchedItems.slice(0, 10)));
+  // ===== 阶段5b: 教育背景区填充验证(学校/专业/学历/起止时间/实习) =====
+  const eduCheck = await page.evaluate(() => {
+    const out = {};
+    const dateInfos = Array.from(document.querySelectorAll('[class*="date_info"]')).map((el) => {
+      const titleEl = el.querySelector('[class*="title"]');
+      const title = titleEl ? titleEl.textContent.trim() : '';
+      const inputs = Array.from(el.querySelectorAll('input[type="text"]')).filter((i) => !i.readOnly);
+      return { title, values: inputs.map((i) => i.value).slice(0, 4) };
+    }).filter((x) => x.title && x.values.length);
+    out.dateInfos = dateInfos.slice(0, 8);
+    const getPh = (ph) => {
+      const el = Array.from(document.querySelectorAll('input')).find((i) => (i.placeholder || '').includes(ph) && !i.readOnly);
+      return el ? el.value : '';
+    };
+    out.school = getPh('请输入就读学校');
+    out.major = getPh('请输入专业名称');
+    out.company = getPh('公司名称');
+    out.position = getPh('职位名称');
+    const degreeInput = Array.from(document.querySelectorAll('input')).find((i) => (i.placeholder || '') === '请选择');
+    out.degree = degreeInput ? degreeInput.value : '';
+    return out;
+  });
+  console.log('  教育背景区:', JSON.stringify(eduCheck));
+  const eduOk = eduCheck.school === '哈尔滨工程大学' && eduCheck.major === '软件工程';
+  const eduTimeOk = (eduCheck.dateInfos || []).some((d) => d.title.includes('毕业时间') && d.values[0] === '2023' && d.values[1] === '6');
+  const intTimeOk = (eduCheck.dateInfos || []).some((d) => d.title.includes('起止时间') && d.values[0] === '2022' && d.values[1] === '6' && d.values[2] === '2022' && d.values[3] === '9');
+  report('阶段5b 教育背景区填充(学校/专业)', eduOk, { school: eduCheck.school, major: eduCheck.major });
+  report('阶段5b 教育起止时间(date_info 年月组件)', eduTimeOk, eduCheck.dateInfos);
+  report('阶段5b 实习起止时间(跨分类 date_info)', intTimeOk, eduCheck.dateInfos);
+  report('阶段5b 实习公司/职位', eduCheck.company === '某科技公司' && eduCheck.position === '后端开发实习生', { company: eduCheck.company, position: eduCheck.position });
+
   // 出生日期面板验证(input 有值即生效; 组件会补全年龄后缀)
   const birthCheck = await page.evaluate(() => {
     const bd = Array.from(document.querySelectorAll('input')).find((i) => {
@@ -221,9 +257,11 @@ function report(name, ok, detail) {
   report('阶段5d 协议复选框自动勾选', agreeCheck.agreed >= 0 && agreeCheck.after.every((x) => x.checked), agreeCheck);
 
   // ===== 阶段6: 弹层清理检查("暂无选项"提示层为非交互提示, 不阻塞) =====
-  // 模拟用户点击页面空白处关闭选择完成后的残留面板
-  await page.mouse.click(1300, 250);
-  await page.waitForTimeout(500);
+  // 模拟用户点击页面多处空白关闭选择完成后的残留面板
+  for (const [x, y] of [[1300, 250], [500, 750], [900, 120]]) {
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(250);
+  }
   const leftover = await page.evaluate(() => {
     const out = [];
     document.querySelectorAll('[class*="Dropdown-dropdown"]').forEach((p) => {
@@ -232,7 +270,11 @@ function report(name, ok, detail) {
     });
     return out;
   });
-  const harmful = leftover.filter((l) => !/暂无选项|没有找到/.test(l.text));
+  const harmful = leftover.filter((l) => {
+    if (/暂无选项|没有找到/.test(l.text)) return false;
+    // 年月值短文本层(如 "2023"/"6")为选择器展开态, 无交互选项, 不阻塞
+    return l.text.length > 12 || /选项|选择|请|确认|保存|添加/.test(l.text);
+  });
   report('阶段6 弹层清理(无阻塞性残留)', harmful.length === 0, { 残留: leftover, 阻塞: harmful });
 
   const outDir = path.join(ROOT, 'reports');

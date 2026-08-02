@@ -126,6 +126,64 @@
     if (style) ctx.visible = style.display !== 'none' && style.visibility !== 'hidden';
     else ctx.visible = !ctx.hidden;
 
+    // MOKA apply 表单: 字段容器 .title 标签(性别/学历/毕业院校等"请选择"字段的标签来源)
+    if (!ctx.labelText && !ctx.prevText) {
+      try {
+        let n2 = el.parentElement;
+        for (let i = 0; i < 5 && n2; i++, n2 = n2.parentElement) {
+          if (!n2.querySelector) continue;
+          const titleEl = n2.querySelector('[class*="title"]');
+          if (titleEl) {
+            const t = cleanText(titleEl.textContent, 12);
+            if (t && t.length >= 2) { ctx.prevText = t; break; }
+          }
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    // MOKA/北森 年月组件(date_info / month-range-select): title(毕业时间/起止时间) + 开始/结束两个选择器
+    // ctx.dateRange = { title, index, multi }  (index: 0=开始, 1=结束; multi: 组件内含多个选择器)
+    try {
+      let node = el.parentElement;
+      for (let i = 0; i < 6 && node; i++, node = node.parentElement) {
+        const cls = String(node.className || '');
+        if (/date_info|month-range-select/.test(cls)) {
+          let title = '';
+          const titleEl = node.querySelector ? node.querySelector('[class*="title"]') : null;
+          if (titleEl) title = cleanText(titleEl.textContent, 12);
+          if (!title) {
+            // 标题在字段容器(apply-field)内, 组件在 ctrl 内: 向上找最近的 title
+            let n3 = node.parentElement;
+            for (let j = 0; j < 5 && n3 && !title; j++, n3 = n3.parentElement) {
+              if (!n3.querySelector) continue;
+              const tEl = n3.querySelector('[class*="title"]');
+              if (tEl) {
+                const t2 = cleanText(tEl.textContent, 12);
+                if (t2 && t2.length >= 2) title = t2;
+              }
+            }
+          }
+          if (!title) {
+            const prevSib = node.previousElementSibling;
+            if (prevSib) title = cleanText(prevSib.textContent, 12);
+          }
+          let index = 0;
+          let multi = false;
+          const halves = node.querySelectorAll ? node.querySelectorAll('[class*="item-half"],[class*="item"]') : [];
+          multi = halves.length > 1;
+          halves.forEach((h, hi) => {
+            if (h.contains && h.contains(el)) index = hi;
+          });
+          const inputCount = node.querySelectorAll ? node.querySelectorAll('input[type="text"]').length : 0;
+          if (title) {
+            ctx.dateRange = { title, index, multi, inputCount };
+            if (!ctx.labelText && !ctx.prevText) ctx.prevText = title;
+          }
+          break;
+        }
+      }
+    } catch (e) { /* ignore */ }
+
     return ctx;
   }
 
@@ -166,6 +224,31 @@
   function matchSchema(ctx) {
     const fz = FUZZY();
     const schema = SCHEMA();
+    // 年月组件强信号(MOKA/北森 date_info): title + 年/月分列 input 组合
+    if (ctx.dateRange && ctx.dateRange.title) {
+      const t = ctx.dateRange.title;
+      const ic = ctx.dateRange.inputCount || (ctx.dateRange.multi ? 2 : 1);
+      // 4 个 input(开始年/月+结束年/月): 前 2 个=开始日期, 后 2 个=结束日期
+      // 2 个 input(年+月): 单日期, 开始/结束由 title 语义
+      const slot = ic >= 4 ? Math.floor(ctx.dateRange.index / 2) : 0;
+      const isEnd = ic >= 4 ? slot === 1 : /毕业|结束|终止|离职/.test(t);
+      const cat = /毕业|入学|就读|教育/.test(t) ? 'education'
+        : /获奖|荣誉/.test(t) ? 'award'
+        : /项目|竞赛|课题|比赛/.test(t + ' ' + ctx.rowText) ? 'project'
+        : /实习|工作|公司|职位|起止|时间|日期/.test(t + ' ' + ctx.rowText) ? 'internship'
+        : '';
+      if (cat === 'award') return { fieldKey: 'skills.awardDate', score: 90, confidence: 'high', via: 'dateRange' };
+      if (cat === 'project') {
+        return { fieldKey: isEnd ? 'project.projEnd' : 'project.projStart', score: 90, confidence: 'high', via: 'dateRange' };
+      }
+      if (cat === 'education') {
+        return { fieldKey: isEnd ? 'education.eduEnd' : 'education.eduStart', score: 90, confidence: 'high', via: 'dateRange' };
+      }
+      if (cat === 'internship') {
+        return { fieldKey: isEnd ? 'internship.intEnd' : 'internship.intStart', score: 90, confidence: 'high', via: 'dateRange' };
+      }
+      return { fieldKey: isEnd ? 'internship.intEnd' : 'internship.intStart', score: 55, confidence: 'medium', via: 'dateRange' };
+    }
     // 特殊强信号
     if (ctx.type === 'email') return { fieldKey: 'basic.email', score: 99, confidence: 'high', via: 'type' };
     if (ctx.type === 'tel') {
@@ -353,8 +436,32 @@
       if (el.name && /^(input|textarea|select|button)$/.test(tag)) {
         return tag + '[name="' + String(el.name).replace(/"/g, '\\"') + '"]';
       }
-      return '';
-    } catch (e) { return ''; }
+      // 增强: input/textarea/select 用 placeholder/type 特征 + 全文档索引(React 重渲染后特征稳定)
+      if (/^(input|textarea|select)$/.test(tag)) {
+        const ph = el.placeholder ? '[placeholder="' + String(el.placeholder).replace(/"/g, '\\"') + '"]' : '';
+        const ta = el.getAttribute && el.getAttribute('type') && el.getAttribute('type') !== 'text' ? '[type="' + el.getAttribute('type') + '"]' : '';
+        const base = tag + ta + ph;
+        if (base !== tag) {
+          const list = Array.from(document.querySelectorAll(base));
+          const idx = list.indexOf(el);
+          return idx > 0 ? base + ':af-index(' + idx + ')' : base;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return '';
+  }
+
+  // 选择器解析(支持 :af-index(n) 扩展: 取全文档第 n 个匹配, React 重渲染后重定位用)
+  function resolveSelector(sel) {
+    try {
+      if (!sel) return null;
+      const m = String(sel).match(/^(.*?):af-index\((\d+)\)$/);
+      if (m) {
+        const list = Array.from(document.querySelectorAll(m[1]));
+        return list[parseInt(m[2], 10)] || null;
+      }
+      return document.querySelector(sel);
+    } catch (e) { return null; }
   }
 
   // ---------- 三级匹配(捕获入库用) ----------
@@ -412,5 +519,5 @@
     return null;
   }
 
-  AS.matcher = { buildContext, signatureOf, matchField, matchCustomField, matchForCapture, resolveValues, resolveOpenQuestion, isOpenQuestionField, genSelector, MATCH_THRESHOLD };
+  AS.matcher = { buildContext, signatureOf, matchField, matchCustomField, matchForCapture, resolveValues, resolveOpenQuestion, isOpenQuestionField, genSelector, resolveSelector, MATCH_THRESHOLD };
 })();

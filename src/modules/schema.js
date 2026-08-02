@@ -125,6 +125,8 @@
       fields: [
         { key: 'projName', label: '项目名称', type: F.text, kw: K.projName },
         { key: 'projRole', label: '个人角色', type: F.text, kw: K.projRole },
+        { key: 'projStart', label: '项目开始时间', type: F.date, kw: ['项目开始', '开始时间', '起始时间', '项目起始', 'start date', 'from'] },
+        { key: 'projEnd', label: '项目结束时间', type: F.date, kw: ['项目结束', '结束时间', '终止时间', '项目截止', 'end date', 'to', 'until'] },
         { key: 'projDuration', label: '项目周期', type: F.text, kw: K.projDuration },
         { key: 'projBackground', label: '项目背景', type: F.text, kw: K.projBackground },
         { key: 'projTech', label: '技术栈', type: F.text, kw: K.projTech },

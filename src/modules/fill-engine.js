@@ -22,9 +22,17 @@
         if (order && order[catId] && Array.isArray(order[catId])) {
           vals = order[catId].map((idx) => vals[idx]).filter((v) => v !== undefined && v !== null && v !== '');
         }
+        // 记录首值: 队列耗尽后复用第一条(如"毕业院校"与"就读学校"实为同一段经历)
+        Object.defineProperty(vals, '__first', { value: vals.length ? vals[0] : undefined, writable: true });
         valueQueues.set(key, vals);
       }
       return valueQueues.get(key);
+    };
+    // 取值: 按序出队; 队列耗尽 → 复用首条(同源字段共享)
+    const takeValue = (q) => {
+      if (q && q.length) return q.shift();
+      if (q && q.__first !== undefined) return q.__first;
+      return undefined;
     };
     const catAllowed = (fieldKey) => {
       if (!sections || !sections.length) return true;
@@ -60,7 +68,8 @@
         if (memories && sel && memories[sel]) {
           const memKey = memories[sel];
           const vals = getValues(memKey);
-          if (vals.length) { fieldKey = memKey; value = vals.shift(); }
+          const mv = takeValue(vals);
+          if (mv !== undefined) { fieldKey = memKey; value = mv; }
         }
       }
       // 2) 复用投递
@@ -84,11 +93,12 @@
         if (m) {
           fieldKey = m.fieldKey;
           const vals = getValues(m.fieldKey);
-          if (!vals.length && AS.matcher.isOpenQuestionField(ctx)) {
+          const mv = takeValue(vals);
+          if (mv === undefined && AS.matcher.isOpenQuestionField(ctx)) {
             const answer = AS.matcher.resolveOpenQuestion(profile, ctx.labelText + ' ' + ctx.placeholder);
             if (answer !== null) { fieldKey = 'openQuestions'; value = answer; }
-          } else if (vals.length) {
-            value = vals.shift();
+          } else if (mv !== undefined) {
+            value = mv;
           } else {
             fieldKey = null;
           }
@@ -99,7 +109,8 @@
         const cm = AS.matcher.matchCustomField(ctx, profile);
         if (cm) {
           const vals = getValues(cm.fieldKey);
-          if (vals.length) { fieldKey = cm.fieldKey; value = vals.shift(); }
+          const cv = takeValue(vals);
+          if (cv !== undefined) { fieldKey = cm.fieldKey; value = cv; }
         }
       }
 
@@ -176,6 +187,13 @@
       if (total > 3 && done % 2 === 0) showProgress(done, total, '正在填充');
       setFillState('filling', `正在填充 ${done}/${total}: ${label || fieldKey || '字段'}`);
       if (!fctx.visible) continue;
+      // 动态元素重定位: React/Vue 重渲染后 el 可能失效, 用生成选择器重新查找(年月组件等自定义控件常见)
+      if (sel) {
+        try {
+          const fresh = AS.matcher.resolveSelector(sel);
+          if (fresh && fresh !== item.field.el) item.field.el = fresh;
+        } catch (e) { /* ignore */ }
+      }
       // 填充自动滚动跟随: 滚动到当前正在填写的字段(设置可关闭)
       if (!opts || opts.autoScroll !== false) {
         try { field.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* ignore */ }
@@ -278,7 +296,17 @@
         // 填充后生效校验: 文本类字段声明成功但值未真正写入 → 标记"未生效"
         // (组件自动补全如 出生日期+年龄 "(25岁)" 前缀一致视为已生效)
         const curVal = String(field.el.value || '');
-        if ((field.type === 'text' || field.type === 'textarea') && origValue && curVal !== String(origValue) && !curVal.startsWith(String(origValue))) {
+        const inDateComp = (() => {
+          try {
+            let n = field.el.parentElement;
+            for (let i = 0; i < 6 && n; i++, n = n.parentElement) {
+              if (/date_info|month-range-select/.test(String(n.className || ''))) return true;
+            }
+          } catch (e) { /* ignore */ }
+          return false;
+        })();
+        const valOk = curVal === String(origValue) || curVal.startsWith(String(origValue)) || (inDateComp && !!curVal);
+        if ((field.type === 'text' || field.type === 'textarea') && origValue && !valOk) {
           report.notEffective = (report.notEffective || 0) + 1;
           report.unmatchedItems.push({ signature: fctx.name || fctx.id || label, label, reason: '已填充但值未生效(框架限制)' });
           unmatchedEls.push({ el: field.el, label });

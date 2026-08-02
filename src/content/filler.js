@@ -521,6 +521,52 @@
             const okP = await fillPanelSelect(el, String(value));
             if (okP) return { ok: true, action: 'filled', detail: '下拉选项选择完成' };
           }
+          // MOKA/北森 年月组件(date_info / month-range-select, 如教育/实习起止时间):
+          // 先直接输入年月(可输入框), 未生效则打开年月面板选择
+          const inDateRange = (() => {
+            try {
+              let n = el.parentElement;
+              for (let i = 0; i < 6 && n; i++, n = n.parentElement) {
+                if (/date_info|month-range-select/.test(String(n.className || ''))) return true;
+              }
+            } catch (e) { /* ignore */ }
+            return false;
+          })();
+          if (inDateRange) {
+            const d = AS.dates.parseDateStr(String(value));
+            if (d) {
+              const ph = String(el.placeholder || '').trim();
+              // 轻量写入: 仅原生 setter + input/change(MOKA 年月组件 focus/blur 会重置值, 不能用 setNativeValue)
+              const lightSet = (el2, v) => {
+                try {
+                  const setter = Object.getOwnPropertyDescriptor(el2.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value').set;
+                  setter.call(el2, String(v));
+                  el2.dispatchEvent(new Event('input', { bubbles: true }));
+                  el2.dispatchEvent(new Event('change', { bubbles: true }));
+                } catch (e) { /* ignore */ }
+              };
+              // 年/月分列输入(MOKA date_info: placeholder 年/月), 直接输入即可被接受
+              if (ph === '年' || ph === '月') {
+                const want = ph === '年' ? String(d.y) : String(d.m).replace(/^0/, '');
+                lightSet(el, want);
+                await sleep(300);
+                if (String(el.value || '') !== want) {
+                  const w2 = ph === '月' ? String(d.m).padStart(2, '0') : want;
+                  lightSet(el, w2);
+                  await sleep(250);
+                }
+                return { ok: true, action: 'filled', detail: '年月组件输入完成' };
+              }
+              const ym = AS.dates.formatDate(d, 'yyyy-mm');
+              lightSet(el, ym);
+              await sleep(350);
+              if (String(el.value || '').indexOf(ym.slice(0, 4)) === 0) {
+                return { ok: true, action: 'filled', detail: '年月组件输入完成' };
+              }
+              const okP2 = await fillYearMonthPanel(el, ym);
+              if (okP2) return { ok: true, action: 'filled', detail: '年月面板选择完成' };
+            }
+          }
           let target = String(value || '');
           const fmt = adaptPhoneFormat(el, target);
           target = adaptPunctuation(el, fmt);
