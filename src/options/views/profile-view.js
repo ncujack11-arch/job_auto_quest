@@ -254,14 +254,14 @@
       style: 'min-width:200px',
       onchange: async (e) => {
         if (dirty) {
-          await doSave();
+          const ok = await doSave();
+          if (!ok) return;
         }
         const id = e.target.value;
         if (!id) return;
         await AS.storage.saveSettings({ activeProfileId: id });
         await loadProfile(id);
-        renderProfileForm(containerRef);
-        renderTop(containerRef.parentElement.querySelector('.toolbar'));
+        await render(containerRef);
       },
     });
     sel.appendChild(UI().el('option', { value: '', text: '— 请选择方案 —' }));
@@ -293,7 +293,7 @@
     toolbar.appendChild(UI().el('button', {
       class: 'btn', text: '✏ 重命名', onclick: () => {
         const name = prompt('新的方案名称:', currentProfile.name);
-        if (name) { currentProfile.name = name; markDirty(); renderTop(containerRef.querySelector('.toolbar')); }
+        if (name) { currentProfile.name = name; markDirty(); render(containerRef); }
       },
     }));
     toolbar.appendChild(UI().el('button', {
@@ -318,14 +318,22 @@
   async function doSave() {
     if (!currentProfile) return;
     currentProfile.updatedAt = Date.now();
-    // 敏感字段加密处理
-    if (AS.encrypt.hasKey && await isEncryptionEnabled()) {
+    // 敏感字段加密处理: 加密已启用时必须先解锁
+    if (await isEncryptionEnabled()) {
+      const unlocked = (await chrome.runtime.sendMessage({ type: 'AF_IS_UNLOCKED' })) || {};
+      if (!unlocked.unlocked) {
+        const pwd = prompt('加密已启用, 请输入解锁口令以加密保存敏感字段:');
+        if (!pwd) { UI().toast('已取消保存', 'error'); return false; }
+        const r = await chrome.runtime.sendMessage({ type: 'AF_UNLOCK', password: pwd });
+        if (!r || !r.ok) { UI().toast('口令错误, 保存取消', 'error'); return false; }
+      }
       await encryptSensitiveFields();
     }
     await AS.storage.saveProfile(currentProfile);
     dirty = false;
     const btn = document.getElementById('profileSaveBtn');
     if (btn) btn.disabled = true;
+    return true;
   }
 
   async function isEncryptionEnabled() {

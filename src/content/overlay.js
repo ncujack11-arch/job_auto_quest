@@ -165,9 +165,10 @@
               company: g('company') || '未知公司',
               position: g('position') || '未知岗位',
               category: g('category'), city: g('city'), channel: g('channel'),
-              url: g('url'), jdSnapshot: g('jd'), note: g('note'),
-              fromPage: true,
+              url: g('url'), jdSnapshot: g('jd'), fromPage: true,
             };
+            const note = g('note');
+            if (note) record.notes = { content: note };
             try {
               const ASM = window.AS;
               const saved = await ASM.apps.createRecord(record);
@@ -186,9 +187,9 @@
   }
 
   // ---------- 加密解锁 ----------
-  function showUnlockPrompt(onOk) {
+  function showUnlockPrompt(onOk, onCancel) {
     const panel = showPanel(h('div', {}, [
-      head('敏感字段已加密'),
+      head('敏感字段已加密', h('button', { class: 'af-close', text: '×', onclick: () => { closePanel(); onCancel && onCancel(); } })),
       h('div', { class: 'af-body' }, [
         h('p', { style: 'margin-bottom:10px', text: '本方案包含加密字段(身份证号/期望薪资), 请输入解锁口令后继续填充。' }),
         h('div', { class: 'af-form' }, [
@@ -198,7 +199,7 @@
           ]),
         ]),
         h('div', { class: 'af-actions' }, [
-          h('button', { class: 'af-btn ghost', text: '取消', onclick: closePanel }),
+          h('button', { class: 'af-btn ghost', text: '取消', onclick: () => { closePanel(); onCancel && onCancel(); } }),
           h('button', { class: 'af-btn primary', text: '解锁', onclick: async () => {
             const pwd = shadow.querySelector('#af-pwd').value;
             if (!pwd) return;

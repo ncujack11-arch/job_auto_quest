@@ -202,6 +202,12 @@
           return { ok: true, action: 'filled' };
         }
         case 'date': {
+          if (el.type === 'month') {
+            const d = AS.dates.parseDateStr(String(value));
+            if (!d) return { ok: false, action: 'unmatched', detail: '无法解析日期' };
+            setNativeValue(el, AS.dates.formatDate(d, 'yyyy-mm'));
+            return { ok: true, action: 'filled' };
+          }
           if (el.type === 'date' || el.type === 'datetime-local') {
             const d = AS.dates.parseDateStr(String(value));
             if (!d) return { ok: false, action: 'unmatched', detail: '无法解析日期' };

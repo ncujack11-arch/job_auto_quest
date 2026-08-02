@@ -28,13 +28,7 @@
 
   async function unlockFlow() {
     return new Promise((resolve) => {
-      AS.overlay.showUnlockPrompt(() => resolve(true));
-      // 用户取消时, 面板被关闭 — 通过 onCancel 回调处理
-      const orig = AS.overlay.closePanel;
-      // 简单处理: 取消后 resolve(false)
-      setTimeout(() => { /* noop */ }, 0);
-      AS.overlay.closePanel = () => { resolve(false); orig(); };
-      setTimeout(() => { AS.overlay.closePanel = orig; }, 60 * 1000);
+      AS.overlay.showUnlockPrompt(() => resolve(true), () => resolve(false));
     });
   }
 
