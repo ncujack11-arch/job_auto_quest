@@ -87,10 +87,52 @@ function isHttpTab(tab) {
   return tab && /^https?:\/\//.test(tab.url || '');
 }
 
+// 核心内容脚本清单(与 manifest content_scripts 一致, 用于兜底注入)
+const CORE_CONTENT_SCRIPTS = [
+  'src/utils/logger.js',
+  'src/modules/schema.js',
+  'src/modules/storage.js',
+  'src/utils/fuzzy.js',
+  'src/utils/dates.js',
+  'src/utils/matcher.js',
+  'src/content/scanner.js',
+  'src/content/filler.js',
+  'src/content/overlay.js',
+  'src/content/detect.js',
+  'src/content/quiz.js',
+  'src/content/content.js',
+];
+
+// 探测内容脚本是否已注入; 未注入则用 scripting 兜底注入
+// (popup 打开 / 右键菜单点击时 activeTab 已授权; 快捷键场景可能无权限, 返回 false)
+async function ensureInjected(tabId) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'AF_PING' });
+    return true;
+  } catch (e) {
+    LOG.info('bg', 'content script not injected, fallback injecting...', tabId);
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: CORE_CONTENT_SCRIPTS,
+      });
+      return true;
+    } catch (e2) {
+      LOG.warn('bg', 'fallback injection failed', e2);
+      return false;
+    }
+  }
+}
+
 async function triggerFill() {
   const tab = await getActiveTab();
   if (!isHttpTab(tab)) {
     LOG.info('bg', 'no http tab');
+    return;
+  }
+  const ok = await ensureInjected(tab.id);
+  if (!ok) {
+    notifyReloadRequired(tab.id);
     return;
   }
   try {
@@ -98,6 +140,19 @@ async function triggerFill() {
   } catch (e) {
     LOG.warn('bg', 'trigger fill failed', e);
   }
+}
+
+// 注入失败时提示用户刷新页面
+function notifyReloadRequired(tabId) {
+  try {
+    chrome.notifications.create('af_inject_fail', {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('src/assets/icons/icon128.png'),
+      title: '秋招网申自动填充',
+      message: '无法在当前页面注入插件脚本(可能是扩展刚更新或页面权限受限), 请刷新页面后重试。',
+      priority: 2,
+    }, () => {});
+  } catch (e) { /* ignore */ }
 }
 
 // ---------- 填充结果聚合 ----------
@@ -135,6 +190,8 @@ function aggregateFillResults() {
 
 // ---------- 投递完成联动 ----------
 async function onSubmissionDetected(tab, msg) {
+  const ok = await ensureInjected(tab.id);
+  if (!ok) { notifyReloadRequired(tab.id); return; }
   LOG.info('bg', 'submission detected', tab.url);
   let info = { url: msg.url || tab.url, title: msg.title || '' };
   try {
@@ -185,14 +242,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case 'AF_LEARN_COLLECT': {
       // 面板/弹窗请求: 转发给当前活动标签页
       getActiveTab().then((tab) => {
-        if (tab) chrome.tabs.sendMessage(tab.id, { type: 'AF_LEARN_COLLECT' }).catch(() => {});
+        if (!tab) return;
+        ensureInjected(tab.id).then((ok) => {
+          if (ok) chrome.tabs.sendMessage(tab.id, { type: 'AF_LEARN_COLLECT' }).catch(() => {});
+        });
       });
       break;
     }
 
+    case 'AF_ENSURE_INJECTED': {
+      getActiveTab().then((tab) => {
+        if (!tab || !isHttpTab(tab)) return sendResponse({ ok: false });
+        ensureInjected(tab.id).then((ok) => sendResponse({ ok }));
+      });
+      return true;
+    }
+
     case 'AF_FILL_SECTIONS': {
       getActiveTab().then((tab) => {
-        if (tab) chrome.tabs.sendMessage(tab.id, { type: 'AF_FILL', sections: msg.sections || [] }).catch(() => {});
+        if (!tab) return;
+        ensureInjected(tab.id).then((ok) => {
+          if (ok) chrome.tabs.sendMessage(tab.id, { type: 'AF_FILL', sections: msg.sections || [] }).catch(() => {});
+        });
       });
       break;
     }
@@ -313,26 +384,23 @@ chrome.commands.onCommand.addListener((command) => {
 
 // ---------- 右键菜单 ----------
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  const sendToTab = (type, extra) => {
+    if (!isHttpTab(tab)) return;
+    ensureInjected(tab.id).then((ok) => {
+      if (!ok) { notifyReloadRequired(tab.id); return; }
+      chrome.tabs.sendMessage(tab.id, Object.assign({ type }, extra || {})).catch((e) => LOG.warn('bg', 'menu msg failed', e));
+    });
+  };
   if (info.menuItemId === 'af-fill-form') {
-    if (isHttpTab(tab)) {
-      chrome.tabs.sendMessage(tab.id, { type: 'AF_FILL' }).catch((e) => LOG.warn('bg', 'menu fill failed', e));
-    }
+    sendToTab('AF_FILL');
   } else if (info.menuItemId === 'af-record') {
-    if (isHttpTab(tab)) {
-      onSubmissionDetected(tab, {});
-    }
+    if (isHttpTab(tab)) onSubmissionDetected(tab, {});
   } else if (info.menuItemId === 'af-show-panel') {
-    if (isHttpTab(tab)) {
-      chrome.tabs.sendMessage(tab.id, { type: 'AF_SHOW_FLOAT' }).catch(() => {});
-    }
+    sendToTab('AF_SHOW_FLOAT');
   } else if (info.menuItemId === 'af-capture-selection') {
-    if (isHttpTab(tab)) {
-      chrome.tabs.sendMessage(tab.id, { type: 'AF_SAVE_SELECTION', text: info.selectionText || '' }).catch(() => {});
-    }
+    sendToTab('AF_SAVE_SELECTION', { text: info.selectionText || '' });
   } else if (info.menuItemId === 'af-quiz-lookup') {
-    if (isHttpTab(tab)) {
-      chrome.tabs.sendMessage(tab.id, { type: 'AF_QUIZ_LOOKUP', text: info.selectionText || '' }).catch(() => {});
-    }
+    sendToTab('AF_QUIZ_LOOKUP', { text: info.selectionText || '' });
   } else if (info.menuItemId === 'af-open-options') {
     chrome.runtime.openOptionsPage();
   }

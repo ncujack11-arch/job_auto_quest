@@ -660,6 +660,9 @@
         sendResponse({ total: fields.length, hostname: location.hostname });
         break;
       }
+      case 'AF_PING':
+        sendResponse({ pong: true });
+        break;
       case 'AF_LEARN_COLLECT':
         collectManualInputs().then((items) => {
           if (items.length) {

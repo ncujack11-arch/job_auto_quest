@@ -81,13 +81,19 @@
         showStatus('error', '信息库为空, 请先在配置页录入个人信息');
         return;
       }
+      // 确保内容脚本已注入(扩展更新后旧页面可能未加载新脚本, 自动兜底注入)
+      const r = await chrome.runtime.sendMessage({ type: 'AF_ENSURE_INJECTED' });
+      if (!r || !r.ok) {
+        showStatus('error', '无法注入脚本, 请刷新当前页面后重试');
+        return;
+      }
       // 分段填充: 收集勾选模块
       const all = $('allSections').checked;
       const sections = all ? [] : Array.from(document.querySelectorAll('#sectionsGrid input:checked')).map((c) => c.value);
       await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_FILL', sections });
       showStatus('ok', '已触发填充, 结果将显示在页面右下角');
     } catch (e) {
-      showStatus('error', '填充失败: ' + (e.message || e));
+      showStatus('error', '填充失败: ' + (e.message || e) + ' — 请刷新页面后重试');
     } finally {
       $('fillBtn').disabled = false;
       $('fillBtn').textContent = '⚡ 一键填充当前表单';
@@ -123,8 +129,7 @@
     $('manualRecord').addEventListener('click', async () => {
       if (!currentTab) return;
       try {
-        const info = await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_GRAB_INFO' });
-        await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_SHOW_RECORD', info: info || {} });
+        await chrome.runtime.sendMessage({ type: 'AF_RECORD_NOW' });
         window.close();
       } catch (e) {
         showStatus('error', '无法在此页面记录投递');
