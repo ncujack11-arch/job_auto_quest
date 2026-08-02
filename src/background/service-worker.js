@@ -339,7 +339,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (d[catId][key] !== val) { d[catId][key] = val; saved++; }
         }
         if (saved) { profile.updatedAt = Date.now(); await AS.storage.saveProfile(profile); }
-        LOG().info('bg', 'learn saved', saved);
+        LOG.info('bg', 'learn saved', saved);
         sendResponse({ saved });
       }).catch((e) => { LOG.error('bg', 'learn save failed', e); sendResponse({ saved: 0, error: e.message || String(e) }); });
       return true;

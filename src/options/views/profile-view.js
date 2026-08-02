@@ -1,4 +1,4 @@
-/**
+﻿/**
  * profile-view.js — 信息库管理视图
  * 多方案切换、全分类字段编辑、自定义字段、敏感字段加密展示
  */
@@ -57,7 +57,14 @@
     document.getElementById('profileSaveBtn').disabled = false;
   }
 
-  function renderProfileForm(container) {
+  // 卡片区容器解析: 避免清空整个视图(含工具条), 保证 markDirty 的保存按钮始终存在
+  function formTarget() {
+    const el = document.getElementById('profileForm');
+    return el && el.isConnected ? el : containerRef;
+  }
+
+  function renderProfileForm() {
+    const container = formTarget();
     container.innerHTML = '';
     const data = currentProfile.data;
 
@@ -82,7 +89,7 @@
             data[cat.id] = data[cat.id] || [];
             data[cat.id].push({});
             markDirty();
-            renderProfileForm(container);
+            renderProfileForm();
           },
         });
         card.appendChild(addBtn);
@@ -106,7 +113,7 @@
           class: 'btn sm danger', text: '删除', onclick: () => {
             data.custom.splice(idx, 1);
             markDirty();
-            renderProfileForm(container);
+            renderProfileForm();
           },
         }),
       ]));
@@ -117,7 +124,7 @@
         data.custom = data.custom || [];
         data.custom.push({ key: '', label: '', value: '' });
         markDirty();
-        renderProfileForm(container);
+        renderProfileForm();
       },
     }));
     container.appendChild(card);
@@ -213,7 +220,7 @@
       class: 'link-btn danger', text: '删除本条', onclick: () => {
         currentProfile.data[cat.id].splice(idx, 1);
         markDirty();
-        renderProfileForm(containerRef);
+        renderProfileForm();
       },
     }));
     card.appendChild(head);
@@ -504,7 +511,12 @@
       profiles.forEach((p) => sel.appendChild(UI().el('option', { value: p.id, text: p.name + (p.description ? ' — ' + p.description : '') })));
       sel.value = currentProfile.id;
     }
-    renderProfileForm(container);
+    // 卡片区独立容器(与工具条分离, 重渲染不破坏保存按钮)
+    const formWrap = UI().el('div', { id: 'profileForm' });
+    container.appendChild(formWrap);
+    renderProfileForm(formWrap);
+  }
+    renderProfileForm();
   }
 
   AS.views = AS.views || {};
