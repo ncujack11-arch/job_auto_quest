@@ -739,6 +739,9 @@
   }
 
   // ---------- 消息路由 ----------
+  // 注意: 内容脚本的所有响应均为同步 sendResponse, 即发即弃消息(AF_FILL 等)不返回 true,
+  // 否则多 frame 页面每个 frame 都保持消息通道, SPA 切换/iframe 销毁时触发
+  // "message channel closed before a response was received"
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || typeof msg !== 'object') return;
     LOG().debug('content', 'msg received', msg.type);
@@ -801,7 +804,8 @@
       default:
         break;
     }
-    return true;
+    // 不返回 true: 避免 fire-and-forget 消息长时间占用消息通道
+    return false;
   });
 
   AS.contentMain = { doFill, grabPageInfo, collectManualInputs };
