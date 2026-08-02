@@ -171,14 +171,21 @@
   }
 
   // ---------- 执行填充计划 ----------
+  // 返回 { snapshots, unmatchedEls } — unmatchedEls 供结果面板点击定位页面字段
   async function executePlan(plan, selectedSet, opts, settings, report) {
     const snapshots = [];
     const items = selectedSet ? plan.items.filter((_, i) => selectedSet.has(i)) : plan.items;
     const memoriesQueue = [];
+    const unmatchedEls = [];
+    let done = 0;
+    const total = items.length;
+    if (total > 3) AS.overlay.showProgress(0, total, '正在填充');
 
     for (const item of items) {
       report.total++;
+      done++;
       const { field, fieldKey, value, label, ctx, sel } = item;
+      if (total > 3 && done % 2 === 0) AS.overlay.showProgress(done, total, '正在填充');
       if (!ctx.visible) continue;
       const snap = snapshotField(field);
       if (snap) snapshots.push(snap);
@@ -214,10 +221,12 @@
       } else if (r.action === 'error') {
         report.errors++;
         report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: r.detail || '填充失败' });
+        unmatchedEls.push({ el: field.el, label });
         AS.overlay.highlight(field.el, 'af-highlight');
       } else {
         report.unmatched++;
         report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: r.detail || '未匹配' });
+        unmatchedEls.push({ el: field.el, label });
         AS.overlay.highlight(field.el, 'af-highlight');
       }
     }
@@ -231,7 +240,9 @@
       }
     } catch (e) { LOG().warn('content', 'save memory failed', e); }
 
-    return snapshots;
+    if (total > 3) AS.overlay.closeProgress();
+
+    return { snapshots, unmatchedEls };
   }
 
   // ---------- 动态行表单: 查找"添加经历"按钮 ----------
@@ -366,7 +377,7 @@
     let plan = buildPlan(AS.scanner.scan(), profile, rule, memories, reuseActive, sections, valueQueues, expOrder || null, settings.refCodes);
     plan.items.forEach((it) => seenFields.add(it.field.el));
 
-    const finish = async (snapshots, withPanel) => {
+    const finish = async (snapshots, unmatchedEls, withPanel) => {
       LOG().info('content', 'fill done in ' + frameLabel(), { filled: report.filled, unmatched: report.unmatched, took: (Date.now() - t0) + 'ms' });
       try { await chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }); } catch (e) { /* noop */ }
       if (report.filled > 0 || report.skipped > 0) {
@@ -379,17 +390,17 @@
       if (reuseActive) AS.storage.clearReusePayload();
       if (!withPanel) return;
       if (report.filled > 0) {
-        AS.overlay.showSummary(report, snapshots && snapshots.length ? () => undoAll(snapshots) : null);
+        AS.overlay.showSummary(report, snapshots && snapshots.length ? () => undoAll(snapshots) : null, unmatchedEls);
       } else if (report.unmatched > 0 || report.errors > 0) {
-        AS.overlay.showSummary(report, null);
+        AS.overlay.showSummary(report, null, unmatchedEls);
       }
     };
 
     // 预览模式(手动)
     if (!isAuto && settings.previewMode && plan.items.length) {
       AS.overlay.showPreview(plan.items, async (selectedSet) => {
-        const snapshots = await executePlan(plan, selectedSet, opts, settings, report);
-        await finish(snapshots, true);
+        const r = await executePlan(plan, selectedSet, opts, settings, report);
+        await finish(r.snapshots, r.unmatchedEls, true);
         AS.overlay.ensureFloatBall();
         if (settings.autoNext) autoNextLoop();
       }, () => {
@@ -398,7 +409,9 @@
       return;
     }
 
-    let snapshots = await executePlan(plan, null, opts, settings, report);
+    let r = await executePlan(plan, null, opts, settings, report);
+    let snapshots = r.snapshots;
+    let unmatchedEls = r.unmatchedEls;
 
     // 动态行续填: 值队列还有剩余且存在"添加"按钮
     const hasRemaining = () => {
@@ -419,12 +432,13 @@
       const extra = buildPlan(fresh, profile, rule, null, reuseActive, sections, valueQueues, null, settings.refCodes);
       extra.items.forEach((it) => seenFields.add(it.field.el));
       if (!extra.items.length) break;
-      const extraSnaps = await executePlan(extra, null, opts, settings, report);
-      snapshots = snapshots.concat(extraSnaps);
+      const er = await executePlan(extra, null, opts, settings, report);
+      snapshots = snapshots.concat(er.snapshots);
+      unmatchedEls = unmatchedEls.concat(er.unmatchedEls);
       rounds++;
     }
 
-    await finish(snapshots, !isAuto);
+    await finish(snapshots, unmatchedEls, !isAuto);
     if (!isAuto) {
       AS.overlay.ensureFloatBall();
       if (settings.autoNext) autoNextLoop();

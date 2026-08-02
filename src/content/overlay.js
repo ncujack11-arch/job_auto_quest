@@ -139,19 +139,68 @@
     return panel;
   }
 
+  // ---------- 填充进度条(实时反馈) ----------
+  let progressPanel = null;
+  let progressTimer = null;
+  function showProgress(done, total, label) {
+    if (!progressPanel) {
+      progressPanel = showPanel(h('div', {}, [
+        head('填充进行中...'),
+        h('div', { class: 'af-body' }, [
+          h('div', { id: 'af-prog-bar', style: 'height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden' }, [
+            h('div', { id: 'af-prog-fill', style: 'height:100%;width:0%;background:#2563eb;transition:width .2s' }),
+          ]),
+          h('div', { id: 'af-prog-text', style: 'font-size:12px;color:#6b7280;margin-top:6px', text: '正在填充...' }),
+        ]),
+      ]));
+    }
+    clearTimeout(progressTimer);
+    progressTimer = setTimeout(() => {
+      const bar = shadow.querySelector('#af-prog-bar');
+      const fill = shadow.querySelector('#af-prog-fill');
+      const text = shadow.querySelector('#af-prog-text');
+      if (bar) {
+        const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+        if (fill) fill.style.width = pct + '%';
+        if (text) text.textContent = `${label || '正在填充'} ${done}/${total} (${pct}%)`;
+      }
+    }, 60);
+  }
+  function closeProgress() {
+    if (progressTimer) clearTimeout(progressTimer);
+    progressTimer = null;
+    if (progressPanel) {
+      try { closePanel(); } catch (e) { /* ignore */ }
+      progressPanel = null;
+    }
+  }
+
   // ---------- 填充结果 ----------
   let lastSummaryAt = 0;
-  function showSummary(summary, undoFn) {
+  function showSummary(summary, undoFn, clickEls) {
     if (!summary || (summary.total === 0 && !summary.blocked)) return;
     const now = Date.now();
     if (now - lastSummaryAt < 4000) return; // 内容脚本本地显示与后台广播去重
     lastSummaryAt = now;
     const filled = summary.filled || 0, skipped = summary.skipped || 0, bad = (summary.unmatched || 0) + (summary.errors || 0);
     const unmatched = summary.unmatchedItems || [];
-    const list = unmatched.slice(0, 12).map((u) => h('div', { class: 'af-item' }, [
-      h('span', { class: 't', text: u.label || u.signature || '未知字段' }),
-      h('span', { class: 'd', text: u.reason || '未匹配' }),
-    ]));
+    // 未匹配项点击可定位到页面元素
+    const list = unmatched.slice(0, 12).map((u, i) => {
+      const item = h('div', { class: 'af-item', style: 'cursor:pointer' });
+      item.appendChild(h('span', { class: 't', text: u.label || u.signature || '未知字段' }));
+      item.appendChild(h('span', { class: 'd', text: u.reason || '未匹配' }));
+      if (clickEls && clickEls[i] && clickEls[i].el) {
+        item.title = '点击定位到页面字段';
+        item.addEventListener('click', () => {
+          try {
+            clickEls[i].el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            AS.overlay.highlight(clickEls[i].el, 'af-highlight');
+            setTimeout(() => AS.overlay.highlight(clickEls[i].el, null), 2500);
+          } catch (e) { /* ignore */ }
+        });
+      }
+      return item;
+    });
     const panel = showPanel(h('div', {}, [
       head('一键填充完成'),
       h('div', { class: 'af-body' }, [
@@ -609,7 +658,7 @@
 
   AS.overlay = {
     showSummary, showRecordPanel, showUnlockPrompt, showLearnPanel, showPreview,
-    showExperiencePicker, showFieldPicker,
+    showExperiencePicker, showFieldPicker, showProgress, closeProgress,
     highlight, clearHighlights, toast, closePanel, ensureFloatBall,
   };
 })();
