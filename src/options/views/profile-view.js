@@ -312,7 +312,93 @@
         UI().toast('已保存', 'success');
       },
     }));
+    toolbar.appendChild(UI().el('button', {
+      class: 'btn', text: '📋 复制视图', onclick: () => openCopyView(),
+    }));
     return toolbar;
+  }
+
+  // ---------- 复制视图: 只读展示 + 一键复制 ----------
+  function profileToText(profile) {
+    const d = profile.data || {};
+    const lines = [];
+    const push = (name, value) => {
+      if (value === undefined || value === null || value === '') return;
+      lines.push(`${name}: ${value}`);
+    };
+    AS.schema.CATEGORIES.forEach((cat) => {
+      if (cat.id === 'openQuestions') return;
+      if (cat.repeatable) {
+        const list = d[cat.id] || [];
+        if (!list.length) return;
+        lines.push(`【${cat.name}】`);
+        list.forEach((entry, i) => {
+          lines.push(`[${i + 1}]`);
+          cat.fields.forEach((f) => push('  ' + f.label, entry[f.key]));
+        });
+      } else if (cat.id === 'custom') {
+        const list = d.custom || [];
+        if (!list.length) return;
+        lines.push(`【${cat.name}】`);
+        list.forEach((c) => push('  ' + (c.label || c.key || '自定义'), c.value));
+      } else {
+        const obj = d[cat.id] || {};
+        const vals = cat.fields.map((f) => obj[f.key]).filter((v) => v !== undefined && v !== null && v !== '');
+        if (!vals.length) return;
+        lines.push(`【${cat.name}】`);
+        cat.fields.forEach((f) => push('  ' + f.label, obj[f.key]));
+      }
+    });
+    if ((d.openQuestions || []).length) {
+      lines.push('【开放题库】');
+      d.openQuestions.forEach((q) => push('  ' + (q.question || '开放题'), q.answer));
+    }
+    return lines.join('\n');
+  }
+
+  function copyText(text) {
+    return new Promise((resolve, reject) => {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(resolve).catch(() => fallback());
+      } else fallback();
+      function fallback() {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+          resolve();
+        } catch (e) { reject(e); }
+      }
+    });
+  }
+
+  function openCopyView() {
+    if (!currentProfile) return;
+    const modal = UI().el('div', { class: 'modal-mask' }, [UI().el('div', { class: 'modal modal-xl' }, [])]);
+    const box = modal.querySelector('.modal');
+    box.appendChild(UI().el('h2', { text: `复制视图 — ${currentProfile.name}` }));
+    box.appendChild(UI().el('p', { class: 'view-sub', style: 'margin-bottom:10px', text: '仅展示已填写内容。当某个表单无法自动填充时, 可在此复制后手动粘贴。加密字段仅在解锁后显示明文。' }));
+    const ta = UI().el('textarea', { style: 'width:100%;min-height:360px;font-size:12.5px;line-height:1.8;border:1px solid #e2e8f0;border-radius:8px;padding:12px;background:#f8fafc;font-family:Consolas,monospace' });
+    ta.value = profileToText(currentProfile);
+    box.appendChild(ta);
+    const foot = UI().el('div', { class: 'modal-foot' }, [
+      UI().el('button', { class: 'btn', text: '复制为 JSON', onclick: async () => {
+        await copyText(JSON.stringify(currentProfile.data, null, 2));
+        UI().toast('JSON 已复制', 'success');
+      } }),
+      UI().el('button', { class: 'btn primary', text: '📋 复制为纯文本', onclick: async () => {
+        await copyText(ta.value);
+        UI().toast('纯文本已复制', 'success');
+      } }),
+      UI().el('button', { class: 'btn', text: '关闭', onclick: () => modal.remove() }),
+    ]);
+    box.appendChild(foot);
+    document.body.appendChild(modal);
   }
 
   async function doSave() {
