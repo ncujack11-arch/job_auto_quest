@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>秋招网申自动填充</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="popup-head">
+    <img src="../assets/icons/icon32.png" alt="logo">
+    <div>
+      <h1>秋招网申自动填充</h1>
+      <p id="site" class="site">当前页面: -</p>
+    </div>
+  </header>
+
+  <main class="popup-body">
+    <section class="profile-section">
+      <label for="profileSelect">当前信息方案</label>
+      <select id="profileSelect"></select>
+      <button id="manageProfiles" class="link-btn" title="管理方案">管理</button>
+    </section>
+
+    <section id="scanInfo" class="scan-info hidden">
+      <span>扫描到 <b id="fieldCount">0</b> 个表单字段</span>
+      <button id="refreshScan" class="link-btn" title="重新扫描">↻</button>
+    </section>
+
+    <button id="fillBtn" class="primary-btn">⚡ 一键填充当前表单</button>
+    <div id="fillStatus" class="fill-status hidden"></div>
+
+    <section class="quick-row">
+      <button id="openOptions" class="ghost-btn">⚙ 完整配置</button>
+      <button id="manualRecord" class="ghost-btn">📋 记录投递</button>
+    </section>
+
+    <footer class="popup-foot">
+      <span id="shortcutTip">快捷键: Alt+Shift+F 一键填充</span>
+      <span class="privacy">🔒 纯本地运行 · 零网络请求</span>
+    </footer>
+  </main>
+
+  <script src="../utils/logger.js"></script>
+  <script src="../modules/schema.js"></script>
+  <script src="../modules/storage.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
