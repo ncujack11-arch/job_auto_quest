@@ -154,6 +154,18 @@
     return v;
   }
 
+  // 中英文标点自动适配: 目标输入框为英文环境(placeholder 纯英文)时, 中文标点转英文
+  function adaptPunctuation(el, value) {
+    const ph = (el && (el.placeholder || '')) || '';
+    if (!ph || !/^[\x00-\x7F\s]*$/.test(ph)) return value;
+    if (!/[，。、；：！？（）""'']/.test(value)) return value;
+    return String(value)
+      .replace(/，/g, ', ').replace(/。/g, '. ').replace(/、/g, ', ')
+      .replace(/；/g, '; ').replace(/：/g, ': ').replace(/！/g, '! ').replace(/？/g, '? ')
+      .replace(/（/g, '(').replace(/）/g, ')')
+      .replace(/"/g, '"').replace(/"/g, '"').replace(/'/g, "'").replace(/'/g, "'");
+  }
+
   // 长度自适应截断
   function truncateFor(el, value) {
     const max = el && typeof el.maxLength === 'number' ? el.maxLength : 0;
@@ -306,7 +318,8 @@
           }
           let target = String(value || '');
           const fmt = adaptPhoneFormat(el, target);
-          const tr = truncateFor(el, fmt);
+          target = adaptPunctuation(el, fmt);
+          const tr = truncateFor(el, target);
           target = tr.value;
           if (o.typing) { await simulateTyping(el, target, o.typingMin || 30, o.typingMax || 120); }
           else {

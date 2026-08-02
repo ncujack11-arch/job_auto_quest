@@ -232,6 +232,22 @@ function t(name, cond) {
   const tmpl = AS.parser.structure(['超级简历', '王五', '教育经历']);
   t('模板检测: wondercv', tmpl.template === 'wondercv');
 
+  console.log('== parser v1.10: 字号标题/中英混合标题/表格空格 ==');
+  // 中英混合标题 "教育背景 EDUCATION BACKGROUND" → education 模块
+  const mixed = AS.parser.structure(['姓名: 张三', '教育背景 EDUCATION BACKGROUND', '浙江大学 本科 计算机', '实习经历 WORK EXPERIENCE', '腾讯科技 前端开发实习生']);
+  t('中英混合标题: 教育背景 EDUCATION → education', mixed.structured.education.length === 1 && mixed.structured.education[0].school.includes('浙江大学'));
+  t('中英混合标题: 实习经历 WORK → internship', mixed.structured.internship.length === 1 && mixed.structured.internship[0].intCompany.includes('腾讯'));
+  // 大字号标题: 标题行字号 20, 正文 10 → 识别为模块
+  const big = AS.parser.structure(
+    ['王五', '13912345678', '教育经历', '浙江大学 硕士 计算机', '技能证书', 'CET-6'],
+    { sizes: [10, 10, 20, 10, 20, 10] }
+  );
+  t('字号标题: 20号"教育经历"识别为模块', big.structured.education.length === 1);
+  t('字号标题: 20号"技能证书"识别为模块', /CET/.test(big.structured.skills.englishLevel || ''));
+  // 表格单元格空格: 行内字段以空格分隔(表格还原后)仍能正确解析
+  const tableLine = AS.parser.structure(['教育经历', '浙江大学 2020-2024 计算机 本科', '实习经历', '腾讯科技 2023 前端开发实习生']);
+  t('表格行空格分隔: 学校/日期/专业可解析', tableLine.structured.education[0].school.includes('浙江大学') && tableLine.structured.education[0].eduStart === '2020' && tableLine.structured.education[0].eduEnd === '2024');
+
   console.log('== matcher: 开放题识别修复 ==');
   const mkOQ = (o) => Object.assign({ tag: 'input', type: 'text', name: '', id: '', placeholder: '', ariaLabel: '', dataTexts: [], labelText: '', rowText: '', prevText: '' }, o);
   t('为什么想加入我们公司 → 开放题', AS.matcher.isOpenQuestionField(mkOQ({ labelText: '为什么想加入我们公司' })) === true);

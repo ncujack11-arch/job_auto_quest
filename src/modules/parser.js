@@ -45,23 +45,27 @@
     const buf = await file.arrayBuffer();
     const doc = await pdfjsLib.getDocument({ data: buf }).promise;
     const lines = [];
+    const lineSizes = [];
     const width = (await doc.getPage(1)).getViewport({ scale: 1 }).width;
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
-      // 文本项带坐标, 用于双栏检测
+      // 文本项带坐标与字号(height), 用于双栏检测 / 表格还原 / 标题识别
       const items = content.items
         .filter((it) => it.str && it.str.trim())
         .map((it) => {
           const t = it.transform;
-          return { str: it.str, x: t[4], y: t[5], w: (it.width || 0) };
+          return { str: it.str, x: t[4], y: t[5], w: (it.width || 0), h: (it.height || 10) };
         });
       const pageLines = groupLines(items);
       const ordered = orderColumns(pageLines, width);
-      ordered.forEach((ln) => lines.push(ln));
+      ordered.forEach((ln) => {
+        lines.push(ln.text);
+        lineSizes.push(ln.size || 10);
+      });
     }
     await doc.destroy();
-    return { text: lines.join('\n'), lines, pdfWidth: width };
+    return { text: lines.join('\n'), lines, lineSizes, pdfWidth: width };
   }
 
   // 按 y 聚类成行(容错字体基线差)
@@ -83,9 +87,19 @@
     return lines
       .map((ln) => {
         ln.items.sort((a, b) => a.x - b.x);
-        ln.text = ln.items.map((i) => i.str).join('').replace(/\s+/g, ' ').trim();
+        // 表格/分栏单元格边界还原: 同行文本块间有明显横向间隙时插入空格, 避免单元格内容粘连
+        let text = '';
+        let prevEnd = null;
+        for (const it of ln.items) {
+          if (prevEnd !== null && it.x - prevEnd > 6) text += ' ';
+          text += it.str;
+          prevEnd = it.x + it.w;
+        }
+        ln.text = text.replace(/\s+/g, ' ').trim();
         ln.minX = Math.min(...ln.items.map((i) => i.x));
         ln.maxX = Math.max(...ln.items.map((i) => i.x + i.w));
+        // 行字号: 取该行最大字号(标题行通常更大)
+        ln.size = Math.max(...ln.items.map((i) => i.h || 10));
         return ln;
       })
       .filter((ln) => ln.text)
@@ -205,9 +219,10 @@
         /^[\u4e00-\u9fa5a-zA-Z0-9（(]/.test(cur) && cur.length < 200 &&
         !/:/.test(cur) && // 排除"标签: 值"行
         !SECTION_RE.test(cur.replace(/[:：]\s*$/, '')) &&
+        !/^[\u4e00-\u9fa5]{2,8}\s+[A-Za-z]/.test(cur) && // 排除中英混合标题行
         !/(?:19|20)\d{2}/.test(cur) &&
         !/(?<!\d)1[3-9]\d{9}(?!\d)|[\w.+-]+@[\w-]+\.[\w-]+/.test(cur) &&
-        !/大学|学院|公司|集团/.test(cur);
+        !/大学|学院|公司|集团|科技|银行|证券/.test(cur); // 排除学校/公司经历行
       if (canMerge) {
         out[out.length - 1] = prev + cur;
       } else {
@@ -320,7 +335,7 @@
     if (posTail && !item.intPosition) item.intPosition = posTail[1];
   }
 
-  function structure(lines) {
+  function structure(lines, opts) {
     const conf = {};   // fieldKey -> 0-100 置信度
     const sources = {}; // fieldKey -> [原文行索引] (校对页高亮用)
     const warnings = [];
@@ -364,25 +379,50 @@
     const template = detectTemplate(enriched.map((e) => e.line).join('\n'));
     if (template) warnings.push(`检测到简历模板: ${template}, 已启用对应解析策略`);
 
+    // 字号特征(PDF 提取): 标题行通常显著大于正文
+    const sizes = (opts && opts.sizes) ? opts.sizes.slice() : null;
+    let fontMedian = 10;
+    if (sizes && sizes.length) {
+      const sorted = sizes.slice().sort((a, b) => a - b);
+      fontMedian = sorted[Math.floor(sorted.length / 2)] || 10;
+    }
+
     let section = 'basic';
     let pendingEdu = null;
     let pendingInt = null;
     let pendingProj = null;
     let intro = '';
 
+    // 章节标题判定: 精确词表 / 中英混合标题 / 大字号行近似
+    const isSectionTitle = (bare, idx) => {
+      if (SECTION_RE.test(bare)) return true;
+      // 中英混合标题: "教育经历 EDUCATION BACKGROUND" / "教育背景 Education"
+      const zhPart = bare.match(/^([\u4e00-\u9fa5／\/、·\s]+?)\s*[A-Za-z]/);
+      if (zhPart && SECTION_RE.test(zhPart[1].trim())) return true;
+      // 大字号短文本行近似标题(模板差异兜底)
+      if (sizes && sizes[idx] !== undefined && fontMedian > 0) {
+        if (sizes[idx] > fontMedian * 1.35) {
+          const t = bare.replace(/[\s·•●◆→▪]+/g, '');
+          if (t.length >= 2 && t.length <= 8 && /(教育|实习|工作|项目|技能|证书|自我评价|荣誉|求职意向|获奖|经历|背景|科研)/.test(t)) return true;
+        }
+      }
+      return false;
+    };
+    const sectionOf = (bare) => bare.includes('教育') ? 'education' :
+      bare.includes('实习') || bare.includes('工作') || bare.includes('实践') ? 'internship' :
+        bare.includes('项目') || bare.includes('科研') ? 'project' :
+          bare.includes('自我评价') || bare.includes('个人评价') || bare.includes('个人总结') || bare.includes('个人简介') || bare.includes('自我介绍') ? 'intro' :
+            bare.includes('技能') || bare.includes('证书') || bare.includes('语言') ? 'skills' :
+              bare.includes('获奖') || bare.includes('荣誉') || bare.includes('奖项') ? 'skills' :
+                bare.includes('求职意向') ? 'intent' : 'basic';
+
     enriched.forEach((e, idx) => {
       const line = e.line;
       if (!line) return;
       // 章节检测(允许冒号结尾)
       const bare = line.replace(/[:：]\s*$/, '');
-      if (SECTION_RE.test(bare)) {
-        section = bare.includes('教育') ? 'education' :
-          bare.includes('实习') || bare.includes('工作') || bare.includes('实践') ? 'internship' :
-            bare.includes('项目') || bare.includes('科研') ? 'project' :
-              bare.includes('自我评价') || bare.includes('个人评价') || bare.includes('个人总结') || bare.includes('个人简介') || bare.includes('自我介绍') ? 'intro' :
-                bare.includes('技能') || bare.includes('证书') || bare.includes('语言') ? 'skills' :
-                  bare.includes('获奖') || bare.includes('荣誉') || bare.includes('奖项') ? 'skills' :
-                    bare.includes('求职意向') ? 'intent' : 'basic';
+      if (isSectionTitle(bare, idx)) {
+        section = sectionOf(bare);
         return;
       }
       // 行首章节+冒号形式: "求职意向: 前端开发工程师" / "教育经历: xxx"
@@ -600,7 +640,7 @@
   async function parseResume(file) {
     LOG().info('parser', 'parse resume', file.name);
     const r = await parseFile(file);
-    const s = structure(r.lines);
+    const s = structure(r.lines, { sizes: r.lineSizes });
     return Object.assign(r, s);
   }
 
