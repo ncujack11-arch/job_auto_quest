@@ -201,7 +201,7 @@
       if (!v) return;
       const mapped = CSV_HEADERS[key] || key;
       if (mapped === 'tags') {
-        rec.tags = [...new Set([...(rec.tags || []), ...v.split(/[,，、|]/).map((t) => t.trim()).filter(Boolean)])];
+        rec.tags = [...new Set([...(rec.tags || []), ...v.split(/[,，、|;；]/).map((t) => t.trim()).filter(Boolean)])];
       } else if (mapped === 'appliedAt') {
         const ts = parseTs(v);
         if (ts) {

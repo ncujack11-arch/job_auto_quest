@@ -136,7 +136,7 @@
   }
 
   // ---------- 结构化提取 ----------
-  const SECTION_RE = /^(基本信息|个人信息|教育经历|教育背景|实习经历|实习经验|工作经历|工作经验|项目经历|项目经验|专业技能|技能证书|技能|证书|获奖经历|所获荣誉|荣誉奖项|自我评价|个人评价|求职意向|校园经历|培训经历|语言能力)$/;
+  const SECTION_RE = /^(基本信息|个人信息|基本资料|个人资料|教育经历|教育背景|教育情况|学习经历|学习情况|教育及培训|实习经历|实习经验|工作经历|工作经验|实习及工作经历|工作实习经历|社会实践|项目经历|项目经验|科研经历|科研项目|参与项目|专业技能|技能证书|技能特长|个人技能|专业技能|技能|证书|获奖经历|所获荣誉|所获奖励|荣誉奖项|荣誉|奖项|自我评价|个人评价|个人总结|个人简介|自我介绍|求职意向|校园经历|培训经历|语言能力|教育培训)$/;
 
   function cleanLine(s) {
     return String(s || '').replace(/[\u3000\s·•●◆→▪]+/g, ' ').trim().replace(/\s+/g, ' ');
@@ -150,6 +150,13 @@
     return null;
   }
 
+  // 无连字符日期对: "2020.09 2024.06" / "2020 2024"
+  function matchDatePair(s) {
+    const m = String(s).match(/((?:19|20)\d{2})[.\/年]?\s*(\d{1,2})?\s*月?\s+(?:至|到|—|~|--)?\s*((?:19|20)\d{2})[.\/年]?\s*(\d{1,2})?\s*月?/);
+    if (m && m[1] !== m[3]) return { startY: m[1], startM: m[2] || '', endY: m[3], endM: m[4] || '' };
+    return null;
+  }
+
   function guessDegree(s) {
     const t = String(s);
     if (/博士/.test(t)) return '博士';
@@ -158,6 +165,71 @@
     if (/大专|专科|高职/.test(t)) return '大专';
     if (/高中|中专/.test(t)) return '高中';
     return '';
+  }
+
+  const SCHOOL_RE = /([\u4e00-\u9fa5A-Za-z0-9·（）()]+?(?:大学|学院|学校|研究院|科学院|党校))/;
+
+  // 从教育行提取字段(兼容: 日期前缀/后缀、学校-学历-专业顺序或倒序、竖线分隔)
+  function parseSchoolLine(text, edu) {
+    let s = cleanLine(text);
+    const range = matchDateRange(s) || matchDatePair(s);
+    if (range) {
+      if (!edu.eduStart) edu.eduStart = `${range.startY}${range.startM ? '-' + range.startM : ''}`;
+      if (!edu.eduEnd) edu.eduEnd = range.endY === '至今' ? '' : `${range.endY}${range.endM ? '-' + range.endM : ''}`;
+      s = s.replace(/(?:19|20)\d{2}[^\s]*?(?:[-—~至到][^\s]*?(?:19|20)\d{2}[^\s]*?)?\s*/, ' ');
+    }
+    const parts = s.split(/[|｜]/).map((p) => p.trim()).filter(Boolean);
+    s = parts[0] || s;
+    if (!edu.school) {
+      const schoolM = s.match(SCHOOL_RE);
+      if (schoolM) edu.school = schoolM[1];
+    }
+    if (!edu.degree) {
+      const deg = guessDegree(s);
+      if (deg) edu.degree = deg;
+    }
+    if (!edu.major && parts.length > 1 && parts[1] && parts[1].length <= 40) {
+      edu.major = parts[1].replace(/(博士|硕士|本科|学士|大专|专科|高职|研究生|在读)/g, '').replace(/^[·|｜\s\-—]+/, '').slice(0, 40);
+    }
+    if (!edu.major) {
+      let rest2 = s;
+      if (edu.school) rest2 = rest2.replace(edu.school, '');
+      rest2 = rest2.replace(/(博士|硕士|本科|学士|大专|专科|高职|研究生|在读|学历|学位)/g, '');
+      if (edu.school) rest2 = rest2.replace(SCHOOL_RE, '');
+      edu.major = rest2.replace(/^[·|｜\s\-—]+/, '').replace(/[|｜].*$/, '').slice(0, 40);
+    }
+  }
+
+  // 从实习行提取字段(兼容: 竖线分隔 公司|岗位|时间、纯公司行、行尾岗位)
+  function parseInternLine(text, item) {
+    let s = cleanLine(text);
+    const range = matchDateRange(s);
+    if (range) {
+      item.intStart = `${range.startY}${range.startM ? '-' + range.startM : ''}`;
+      item.intEnd = range.endY === '至今' ? '' : `${range.endY}${range.endM ? '-' + range.endM : ''}`;
+      s = s.replace(/(?:19|20)\d{2}[^\s]*?(?:[-—~至到][^\s]*?(?:19|20)\d{2}[^\s]*?)?\s*/, ' ');
+    }
+    const parts = s.split(/[|｜]/).map((p) => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      parts.forEach((p) => {
+        if (/^[\d]/.test(p) || matchDateRange(p)) return;
+        if (/公司|集团|科技|有限|银行|证券|保险|事务所|研究院/.test(p) && !item.intCompany) item.intCompany = p.slice(0, 40);
+        else if (/(实习|工程师|专员|助理|分析师|顾问|开发|运营|产品|设计|测试|管培|校招)/.test(p) && !item.intPosition) item.intPosition = p.slice(0, 30);
+        else if (!item.intCompany) item.intCompany = p.slice(0, 40);
+        else if (!item.intPosition && p.length <= 20) item.intPosition = p.slice(0, 30);
+      });
+      return;
+    }
+    const companyM = s.match(/([\u4e00-\u9fa5A-Za-z0-9·（）()]+?(?:公司|集团|科技|网络|银行|证券|保险|事务所|研究院|中心|部|局))/);
+    if (companyM) item.intCompany = companyM[1];
+    else {
+      const m = s.match(/^([\u4e00-\u9fa5A-Za-z0-9·（）()]{2,30})$/);
+      if (m) item.intCompany = m[1];
+    }
+    const posM = s.match(/(?:担任|任职|岗位|职位|实习)\s*[:：]?\s*([\u4e00-\u9fa5A-Za-z0-9/（）()]{2,20})/);
+    if (posM) item.intPosition = posM[1];
+    const posTail = s.match(/([\u4e00-\u9fa5A-Za-z0-9/（）()]{2,16}(?:实习生|工程师|专员|助理|分析师|顾问|经理))$/);
+    if (posTail && !item.intPosition) item.intPosition = posTail[1];
   }
 
   function structure(lines) {
@@ -174,161 +246,207 @@
     };
     const setBasic = (key, v, c) => set('basic', key, v, c);
 
+    // 预扫描行特征(姓名推断: 姓名行通常紧邻联系方式)
+    const enriched = (lines || []).map((raw) => {
+      const line = cleanLine(raw);
+      return {
+        line,
+        phone: (line.match(/(?<!\d)1[3-9]\d{9}(?!\d)/) || [null])[0],
+        email: (line.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/) || [null])[0],
+        idCard: (line.match(/\b\d{17}[\dXx]\b/) || [null])[0],
+      };
+    });
+
     let section = 'basic';
     let pendingEdu = null;
     let pendingInt = null;
     let pendingProj = null;
     let intro = '';
 
-    for (const raw of lines) {
-      const line = cleanLine(raw);
-      if (!line) continue;
-      // 章节检测(去冒号)
+    enriched.forEach((e, idx) => {
+      const line = e.line;
+      if (!line) return;
+      // 章节检测(允许冒号结尾)
       const bare = line.replace(/[:：]\s*$/, '');
       if (SECTION_RE.test(bare)) {
         section = bare.includes('教育') ? 'education' :
-          bare.includes('实习') || bare.includes('工作') ? 'internship' :
-            bare.includes('项目') ? 'project' :
-              bare.includes('自我评价') || bare.includes('个人评价') ? 'intro' :
-                bare.includes('技能') || bare.includes('证书') ? 'skills' :
-                  bare.includes('获奖') || bare.includes('荣誉') ? 'skills' :
+          bare.includes('实习') || bare.includes('工作') || bare.includes('实践') ? 'internship' :
+            bare.includes('项目') || bare.includes('科研') ? 'project' :
+              bare.includes('自我评价') || bare.includes('个人评价') || bare.includes('个人总结') || bare.includes('个人简介') || bare.includes('自我介绍') ? 'intro' :
+                bare.includes('技能') || bare.includes('证书') || bare.includes('语言') ? 'skills' :
+                  bare.includes('获奖') || bare.includes('荣誉') || bare.includes('奖项') ? 'skills' :
                     bare.includes('求职意向') ? 'intent' : 'basic';
-        continue;
+        return;
+      }
+      // 行首章节+冒号形式: "求职意向: 前端开发工程师" / "教育经历: xxx"
+      const secM = line.match(/^(求职意向|教育经历|教育背景|实习经历|工作经历|项目经历|专业技能|技能证书|自我评价|个人评价|获奖经历|所获荣誉)\s*[:：]/);
+      if (secM) {
+        const head = secM[1];
+        section = head.includes('教育') ? 'education' :
+          head.includes('实习') || head.includes('工作') ? 'internship' :
+            head.includes('项目') ? 'project' :
+              head.includes('自我评价') || head.includes('个人评价') ? 'intro' :
+                head.includes('技能') || head.includes('证书') ? 'skills' :
+                  head.includes('获奖') || head.includes('荣誉') ? 'skills' : 'intent';
+        // 不 return, 继续用当前行内容解析(如 "求职意向: 前端开发工程师")
       }
       // 标签剥离: "姓名: 张三"
       const labeled = line.match(/^(姓名|真实姓名)\s*[:：]\s*(\S{2,20})$/);
       if (labeled && section === 'basic') {
         setBasic('name', labeled[2], 'high');
-        continue;
+        return;
       }
 
       if (section === 'basic') {
-        // 手机
-        const phoneM = line.match(/(?<!\d)1[3-9]\d{9}(?!\d)/);
-        if (phoneM) { setBasic('phone', phoneM[0], 'high'); continue; }
-        const emailM = line.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/);
-        if (emailM) { setBasic('email', emailM[0], 'high'); continue; }
-        const idM = line.match(/\b\d{17}[\dXx]\b/);
-        if (idM) { setBasic('idCard', idM[0], 'high'); continue; }
+        // 姓名推断: 与手机/邮箱同行; 或 2-4 字中文行且下一行含联系方式
+        if (!out.basic.name) {
+          const inline = line.match(/^([\u4e00-\u9fa5·]{2,4})\s+(?:1[3-9]\d{9}|[\w.+-]+@[\w-]+\.[\w-]+)/);
+          if (inline) { setBasic('name', inline[1], 'high'); }
+          else if (/^[\u4e00-\u9fa5·]{2,4}$/.test(line)) {
+            const next = enriched[idx + 1];
+            if (next && (next.phone || next.email)) {
+              setBasic('name', line, 'high');
+            }
+          }
+        }
+        if (e.phone) { setBasic('phone', e.phone, 'high'); return; }
+        if (e.email) { setBasic('email', e.email, 'high'); return; }
+        if (e.idCard) { setBasic('idCard', e.idCard, 'high'); return; }
         const gM = line.match(/(?:性别|sex|gender)\s*[:：]\s*(男|女)/i);
-        if (gM) { setBasic('gender', gM[1] === '男' ? '男' : '女', 'high'); continue; }
+        if (gM) { setBasic('gender', gM[1] === '男' ? '男' : '女', 'high'); return; }
         const bM = line.match(/(?:出生(?:日期|年月|时间)?|birthday|date\s*of\s*birth)\s*[:：]?\s*(((?:19|20)\d{2})\s*[年.\/]\s*\d{1,2}\s*月?(?:\s*\d{1,2}\s*日?)?)/i);
-        if (bM) { setBasic('birthday', bM[1].replace(/\s+/g, ''), 'high'); continue; }
+        if (bM) { setBasic('birthday', bM[1].replace(/\s+/g, ''), 'high'); return; }
         const npM = line.match(/(?:籍贯|出生地|户籍|hometown|native\s*place)\s*[:：]\s*(\S{2,20})/i);
-        if (npM) { setBasic('nativePlace', npM[1], 'medium'); continue; }
+        if (npM) { setBasic('nativePlace', npM[1], 'medium'); return; }
         const locM = line.match(/(?:现居地|现居住地|居住地|所在地|城市|location)\s*[:：]\s*(\S{2,20})/i);
-        if (locM) { setBasic('currentLocation', locM[1], 'medium'); continue; }
+        if (locM) { setBasic('currentLocation', locM[1], 'medium'); return; }
         const polM = line.match(/(?:政治面貌)\s*[:：]\s*(中共党员|中共预备党员|共青团员|党员|团员|群众)/);
-        if (polM) { setBasic('politicalStatus', polM[1] === '党员' ? '中共党员' : polM[1] === '团员' ? '共青团员' : polM[1], 'medium'); continue; }
-        // 姓名兜底: 首行且 2-4 字, 非数字非邮箱
+        if (polM) { setBasic('politicalStatus', polM[1] === '党员' ? '中共党员' : polM[1] === '团员' ? '共青团员' : polM[1], 'medium'); return; }
+        // 基本信息尾部兜底: 无标签的 2-4 字中文行(通常是姓名)
         if (!out.basic.name && /^[\u4e00-\u9fa5·]{2,4}$/.test(line)) {
           setBasic('name', line, 'low');
           warnings.push('姓名由首行推断, 请核对');
         }
-        continue;
+        return;
       }
 
       if (section === 'education') {
-        const range = matchDateRange(line);
-        if (range) {
-          if (pendingEdu) {
-            out.education.push(pendingEdu);
-            Object.keys(pendingEdu).forEach((k) => { if (pendingEdu[k]) conf['education.school'] = conf['education.school'] || 'medium'; });
-          }
-          pendingEdu = { school: '', degree: '', major: '', eduStart: `${range.startY}${range.startM ? '-' + range.startM : ''}`, eduEnd: range.endY === '至今' ? '' : `${range.endY}${range.endM ? '-' + range.endM : ''}` };
-          const rest = line.replace(/^\s*((?:19|20)\d{2}).*?[-—~至到].*?((?:19|20)\d{2})\S*\s*/, ' ');
-          if (rest) {
-            const schoolM = rest.match(/([\u4e00-\u9fa5A-Za-z0-9·]+?(?:大学|学院|学校|研究院|科学院|学院校|大学院校))/);
-            if (schoolM) pendingEdu.school = schoolM[1];
-            const deg = guessDegree(rest);
-            if (deg) pendingEdu.degree = deg;
-            const rest2 = rest.replace(schoolM ? schoolM[0] : '', '').replace(/(博士|硕士|本科|学士|大专|专科|高职|研究生)/g, '').replace(/[\u4e00-\u9fa5]*(大学|学院)/, '');
-            pendingEdu.major = rest2.replace(/^[·|｜\s]*/, '').slice(0, 40);
-          }
-          continue;
+        const range = matchDateRange(line) || matchDatePair(line);
+        const schoolHit = SCHOOL_RE.test(line);
+        if (range || (schoolHit && !pendingEdu)) {
+          if (pendingEdu) { out.education.push(pendingEdu); pendingEdu = null; }
+          pendingEdu = { school: '', degree: '', major: '', eduStart: '', eduEnd: '', gpa: '', gpaRank: '', majorCourses: '' };
+          parseSchoolLine(line, pendingEdu);
+          return;
         }
         if (pendingEdu) {
-          const schoolM = line.match(/([\u4e00-\u9fa5A-Za-z0-9·]+?(?:大学|学院|学校|研究院))/);
-          if (schoolM && !pendingEdu.school) { pendingEdu.school = schoolM[1]; line.replace(schoolM[0], ''); }
+          const schoolM = line.match(SCHOOL_RE);
+          if (schoolM && !pendingEdu.school) pendingEdu.school = schoolM[1];
           const deg = guessDegree(line);
           if (deg && !pendingEdu.degree) pendingEdu.degree = deg;
-          if (!pendingEdu.major && !schoolM && line.length <= 40 && !/[，。;；]/.test(line) && !/^[0-9]/.test(line)) {
-            pendingEdu.major = line;
-          } else if (/GPA|绩点|排名/.test(line)) {
-            const g = line.match(/(?:GPA|绩点)\s*[:：]?\s*([\d.]+)/i);
+          if (/GPA|绩点|平均成绩/.test(line)) {
+            const g = line.match(/(?:GPA|绩点|平均成绩)\s*[:：]?\s*([\d.]+)/i);
             if (g && !pendingEdu.gpa) pendingEdu.gpa = g[1];
           }
+          if (/排名/.test(line)) {
+            const rk = line.match(/(?:排名|rank)\s*[:：]?\s*([^\s]{1,24})/i);
+            if (rk && !pendingEdu.gpaRank) pendingEdu.gpaRank = rk[1];
+          }
+          if (/课程/.test(line) && !pendingEdu.majorCourses) {
+            pendingEdu.majorCourses = line.replace(/.*[:：]/, '').slice(0, 150);
+          }
+          if (!pendingEdu.major && !schoolM && line.length <= 40 && !/[，。;；]/.test(line) && !/^[0-9]/.test(line) && !/GPA|排名|课程/.test(line)) {
+            pendingEdu.major = line.replace(/(博士|硕士|本科|学士|大专|专科|高职|研究生|在读)/g, '').trim();
+          }
         }
-        continue;
+        return;
       }
 
       if (section === 'internship') {
         const range = matchDateRange(line);
-        if (range || (line.length >= 4 && /公司|集团|科技|有限|网络|银行|证券|保险|事务所/.test(line))) {
-          if (pendingInt) out.internship.push(pendingInt);
-          pendingInt = {
-            intCompany: '', intDepartment: '', intPosition: '', intStart: '', intEnd: '',
-            workContent: '', achievements: '',
-          };
-          if (range) { pendingInt.intStart = `${range.startY}${range.startM ? '-' + range.startM : ''}`; pendingInt.intEnd = range.endY === '至今' ? '' : `${range.endY}${range.endM ? '-' + range.endM : ''}`; }
-          const rest = line.replace(/^\s*((?:19|20)\d{2}).*?[-—~至到].*?((?:19|20)\d{2})\S*\s*/, ' ');
-          const companyM = rest.match(/([\u4e00-\u9fa5A-Za-z0-9·（）()]+?(?:公司|集团|科技|网络|银行|证券|保险|事务所|研究院|中心|部|局))/) || rest.match(/^([\u4e00-\u9fa5A-Za-z0-9·（）()]{2,30})$/);
-          if (companyM) pendingInt.intCompany = companyM[1];
-          const posM = rest.match(/(?:担任|任职|岗位|职位|实习)\s*[:：]?\s*([\u4e00-\u9fa5A-Za-z0-9/（）()]{2,20})/);
-          if (posM) pendingInt.intPosition = posM[1];
-          continue;
+        const companyHit = /公司|集团|科技|有限|网络|银行|证券|保险|事务所|研究院|工作室/.test(line);
+        if (range || (companyHit && !pendingInt)) {
+          if (pendingInt) { out.internship.push(pendingInt); pendingInt = null; }
+          pendingInt = { intCompany: '', intDepartment: '', intPosition: '', intStart: '', intEnd: '', workContent: '', achievements: '' };
+          parseInternLine(line, pendingInt);
+          return;
         }
         if (pendingInt) {
-          const posM = line.match(/^([\u4e00-\u9fa5A-Za-z0-9/（）()·]{2,16})(?:实习生|工程师|专员|助理|分析师|顾问|实习)?$/);
-          if (posM && !pendingInt.intPosition && line.length <= 20 && !/[，。；;：:]/.test(line)) {
+          if (!pendingInt.intPosition && line.length <= 24 && !/[，。；;：:]/.test(line) && !/^[\d]/.test(line) && !/(职责|工作内容|负责|参与|独立|协助)/.test(line)) {
             pendingInt.intPosition = line;
-            continue;
+            return;
           }
-          const dutyM = line.match(/(?:职责|工作内容|负责)\s*[:：]/);
-          if (dutyM || (line.length > 10 && !/^[0-9]/.test(line))) {
-            pendingInt.workContent = (pendingInt.workContent ? pendingInt.workContent + '; ' : '') + line.slice(0, 100);
+          if (/(职责|工作内容|负责|参与|独立完成|协助)/.test(line)) {
+            pendingInt.workContent = (pendingInt.workContent ? pendingInt.workContent + '; ' : '') + line.slice(0, 120);
           }
         }
-        continue;
+        return;
       }
 
       if (section === 'project') {
-        const looksNew = /^[A-Za-z0-9\u4e00-\u9fa5·（）()]{2,40}$/.test(line) && line.length <= 40 && !/[，。；;：:\.]/.test(line) && !/职责|成果|技术|背景|负责|实现|基于/.test(line);
+        const parts = line.split(/[|｜]/).map((p) => p.trim()).filter(Boolean);
+        if (parts.length >= 2) {
+          // 竖线: 项目名 | 角色 | 时间
+          if (pendingProj && pendingProj.projName) { out.project.push(pendingProj); pendingProj = null; }
+          pendingProj = { projName: parts[0].slice(0, 40), projRole: '', projDuration: '', projTech: '', projDuty: '', projOutcome: '' };
+          const durIdx = parts.findIndex((p) => matchDateRange(p) || matchDatePair(p));
+          if (durIdx > 0) pendingProj.projDuration = parts[durIdx].trim();
+          const rolePart = parts[durIdx === 1 ? 2 : 1] || '';
+          if (rolePart && rolePart.length <= 24) {
+            const roleM = rolePart.match(/(?:担任|角色|负责|组长|成员|主持|参与|开发)\s*[:：]?\s*([\u4e00-\u9fa5A-Za-z0-9/（）()·]{2,20})/);
+            pendingProj.projRole = roleM ? roleM[1] : rolePart;
+          }
+          return;
+        }
+        const looksNew = /^[A-Za-z0-9\u4e00-\u9fa5·（）()\[\]【】]{2,40}$/.test(line) && line.length <= 40 && !/[，。；;：:\.]/.test(line) && !/职责|成果|技术|背景|负责|实现|基于/.test(line);
         if (looksNew && !pendingProj) {
           pendingProj = { projName: line, projRole: '', projDuration: '', projTech: '', projDuty: '', projOutcome: '' };
-          continue;
+          return;
         }
         if (looksNew && pendingProj && pendingProj.projName && pendingProj.projName !== line) {
           out.project.push(pendingProj);
           pendingProj = { projName: line, projRole: '', projDuration: '', projTech: '', projDuty: '', projOutcome: '' };
-          continue;
+          return;
         }
         if (pendingProj) {
-          if (/(?:技术|工具|技术栈|stack)\s*[:：]/.test(line)) pendingProj.projTech = line.replace(/.*[:：]/, '').slice(0, 60);
+          if (/(?:技术|工具|技术栈|stack|语言)\s*[:：]/.test(line)) pendingProj.projTech = line.replace(/.*[:：]/, '').slice(0, 60);
           else if (/(?:职责|负责|工作)\s*[:：]/.test(line)) pendingProj.projDuty = line.replace(/.*[:：]/, '').slice(0, 120);
           else if (/(?:成果|效果|结果|成效)\s*[:：]/.test(line)) pendingProj.projOutcome = line.replace(/.*[:：]/, '').slice(0, 120);
           else if (/(?:角色|担任)\s*[:：]/.test(line)) pendingProj.projRole = line.replace(/.*[:：]/, '').slice(0, 30);
           else if (/(?:周期|时间|起止)\s*[:：]/.test(line)) pendingProj.projDuration = line.replace(/.*[:：]/, '').slice(0, 30);
           else if (line.length > 10 && !pendingProj.projDuty) pendingProj.projDuty = line.slice(0, 120);
         }
-        continue;
+        return;
       }
 
       if (section === 'skills') {
-        const englishM = line.match(/(?:CET[- ]?4|CET[- ]?6|英语四级|英语六级|专业四级|专业八级|雅思|托福|TEM[- ]?4|TEM[- ]?8)/i);
-        if (englishM) { set('skills', 'englishLevel', englishM[0].toUpperCase().replace('CET-', 'CET-').replace(/^CET[- ]?4$/, 'CET-4').replace(/^CET[- ]?6$/, 'CET-6'), 'medium'); continue; }
-        if (/计算机|国家二级|二级|三级|软考|软件设计师/.test(line)) { set('skills', 'computerLevel', /二级/.test(line) ? '国家二级' : /三级/.test(line) ? '国家三级' : '其他', 'medium'); continue; }
-        if (/证书|资格|认证|license|certificate/i.test(line)) { out.skills.certificates = (out.skills.certificates ? out.skills.certificates + '; ' : '') + line.slice(0, 80); continue; }
-        if (/奖|荣誉|奖学金/.test(line)) { out.skills.awards = (out.skills.awards ? out.skills.awards + '; ' : '') + line.slice(0, 80); continue; }
-        if (line.length > 2 && !/^[\d.]+$/.test(line)) {
+        const englishM = line.match(/(?:CET[- ]?4|CET[- ]?6|TEM[- ]?4|TEM[- ]?8|英语四级|英语六级|专业四级|专业八级|雅思|托福)/i);
+        if (englishM) {
+          let v = englishM[0].toUpperCase().replace(/^CET[- ]?4$/, 'CET-4').replace(/^CET[- ]?6$/, 'CET-6').replace(/^TEM[- ]?4$/, '专业四级').replace(/^TEM[- ]?8$/, '专业八级');
+          if (!out.skills.englishLevel) set('skills', 'englishLevel', v, 'medium');
+          return;
+        }
+        if (/计算机|软考|软件设计师|二级|三级/.test(line)) {
+          if (!out.skills.computerLevel) set('skills', 'computerLevel', /二级/.test(line) ? '国家二级' : /三级/.test(line) ? '国家三级' : '其他', 'medium');
+          return;
+        }
+        if (/证书|资格|认证|license|certificate/i.test(line)) {
+          out.skills.certificates = (out.skills.certificates ? out.skills.certificates + '; ' : '') + line.slice(0, 80);
+          return;
+        }
+        if (/奖|荣誉|奖学金/.test(line)) {
+          out.skills.awards = (out.skills.awards ? out.skills.awards + '; ' : '') + line.slice(0, 80);
+          return;
+        }
+        if (line.length > 2 && !/^[\d.]+$/.test(line) && !/^(证书|技能)/.test(line)) {
           out.skills.certificates = (out.skills.certificates ? out.skills.certificates + '; ' : '') + line.slice(0, 80);
         }
-        continue;
+        return;
       }
 
       if (section === 'intro') {
         intro += line + '\n';
-        continue;
+        return;
       }
 
       if (section === 'intent') {
@@ -336,14 +454,18 @@
         if (posM) set('intent', 'targetPosition', posM[1], 'medium');
         const cityM = line.match(/(?:城市|地点|地区)\s*[:：]?\s*([\u4e00-\u9fa5A-Za-z0-9·、（）()]{2,30})/);
         if (cityM) set('intent', 'targetCity', cityM[1], 'medium');
-        continue;
+        const salM = line.match(/(?:薪资|薪酬|待遇|工资|期望月薪)\s*[:：]?\s*([\dKk万Ww.-]{2,30})/);
+        if (salM) set('intent', 'expectedSalary', salM[1], 'medium');
+        const avM = line.match(/(?:可入职|到岗|入职时间)\s*[:：]?\s*(\S{2,20})/);
+        if (avM) set('intent', 'availableDate', avM[1], 'medium');
+        return;
       }
-    }
+    });
 
     // 收尾挂载
-    if (pendingEdu) { out.education.push(pendingEdu); }
-    if (pendingInt) { out.internship.push(pendingInt); }
-    if (pendingProj) { out.project.push(pendingProj); }
+    if (pendingEdu) { out.education.push(pendingEdu); pendingEdu = null; }
+    if (pendingInt) { out.internship.push(pendingInt); pendingInt = null; }
+    if (pendingProj) { out.project.push(pendingProj); pendingProj = null; }
     if (intro.trim()) {
       out.openQuestions.push({ question: '自我介绍', answer: intro.trim().slice(0, 500) });
       conf['openQuestions.自我介绍'] = 'medium';
@@ -353,6 +475,13 @@
       out[k] = out[k].filter((e) => Object.values(e).some((v) => v));
     });
 
+    // 身份证推导出生日期
+    if (out.basic.idCard && !out.basic.birthday) {
+      const id = out.basic.idCard;
+      if (/^\d{17}[\dXx]$/.test(id)) {
+        setBasic('birthday', `${id.slice(6, 10)}-${id.slice(10, 12)}-${id.slice(12, 14)}`, 'medium');
+      }
+    }
     // 姓名置信度兜底
     if (out.basic.name && !conf['basic.name']) conf['basic.name'] = 'low';
     if (!out.basic.phone && !out.basic.email) warnings.push('未识别到联系方式, 请手动补充');
