@@ -189,7 +189,17 @@
     return { value, truncated: false };
   }
 
-  // 自定义下拉组件(ElementUI / AntD / 原生角色)
+  // 关闭残留弹层(Escape 键 + 失焦), 避免遮挡页面
+  function dismissOverlays() {
+    try {
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      const esc = new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true });
+      document.dispatchEvent(esc);
+      document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', bubbles: true }));
+    } catch (e) { /* ignore */ }
+  }
+
+  // 自定义下拉组件(ElementUI / AntD / 原生角色 / MOKA 搜索式学校专业)
   async function fillCustom(el, custom, value) {
     const root = custom || el;
     // 尝试输入
@@ -198,24 +208,31 @@
       setNativeValue(input, String(value));
       input.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
       input.dispatchEvent(new Event('input', { bubbles: true }));
-      // 输入后再尝试点击匹配项
       await sleep(120);
-      const items = document.querySelectorAll('[role="option"],[role="listbox"] li,[role="listbox"] [class*="option"],.el-select-dropdown__item,.ant-select-item-option,[class*="dropdown"] li,[class*="select"] [class*="item"]');
+      // 搜索式下拉(学校/专业/城市): 输入后异步出结果, 轮询等待匹配项
       let best = null, bestScore = 0;
-      items.forEach((it) => {
-        const t = it.textContent || '';
-        const hit = FUZZY().closest(String(value), [t], { minScore: 0.6, aliases: VALUE_ALIASES[String(value)] ? { [value]: VALUE_ALIASES[String(value)] } : undefined });
-        if (hit && hit.score > bestScore) { bestScore = hit.score; best = it; }
-      });
+      for (let i = 0; i < 8 && !best; i++) {
+        await sleep(250);
+        const items = document.querySelectorAll('[role="option"],[role="listbox"] li,[role="listbox"] [class*="option"],.el-select-dropdown__item,.ant-select-item-option,[class*="dropdown"] li,[class*="select"] [class*="item"],[class*="dropdown-menu"] [class*="item"],[class*="option-item"],[class*="list-item"]');
+        items.forEach((it) => {
+          const t = it.textContent || '';
+          const hit = FUZZY().closest(String(value), [t], { minScore: 0.6, aliases: VALUE_ALIASES[String(value)] ? { [value]: VALUE_ALIASES[String(value)] } : undefined });
+          if (hit && hit.score > bestScore) { bestScore = hit.score; best = it; }
+        });
+        // 菜单已消失(组件自关闭)则停止轮询
+        if (!items.length && document.querySelector('[class*="dropdown"], [class*="select-dropdown"]')) break;
+      }
       if (best) {
         best.scrollIntoView({ block: 'center' });
         await sleep(80);
         best.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
         best.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
         best.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await sleep(200);
         return true;
       }
-      // 无匹配项时保留已输入文本
+      // 无匹配项: 保留已输入文本并关闭残留菜单
+      dismissOverlays();
       return true;
     }
     // 无内部输入框: 直接尝试点击匹配项
@@ -228,6 +245,54 @@
       }
     }
     return false;
+  }
+
+  // 年月面板日期组件(MOKA/北森 sd- 系列: 左箭头/年文本/右箭头 + 十二个月表格)
+  // trigger: 只读 input; ym: 'YYYY-MM'
+  async function fillYearMonthPanel(trigger, ym) {
+    const mt = String(ym).match(/^(\d{4})-(\d{1,2})/);
+    if (!mt) return false;
+    const targetY = parseInt(mt[1], 10);
+    const targetM = parseInt(mt[2], 10);
+    const MONTHS = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+    try {
+      // 1. 打开面板
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      trigger.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await sleep(600);
+      // 2. 找可见面板
+      let panel = null;
+      document.querySelectorAll('[class*="Dropdown-dropdown"],[class*="picker-panel"],[class*="picker-dropdown"]').forEach((p) => {
+        if (panel) return;
+        const r = p.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) panel = p;
+      });
+      if (!panel) return false;
+      // 3. 年份: 解析当前年, 点箭头直到匹配
+      const yearEl = panel.querySelector('[class*="basic-selector-year"], [class*="select-year"], [class*="picker-year"]');
+      if (!yearEl) return false;
+      const curYear = () => parseInt((yearEl.textContent || '').replace(/\D/g, ''), 10) || 0;
+      let guard = 0;
+      while (curYear() !== targetY && guard < 80) {
+        const cls = curYear() < targetY ? 'icondoubleRight' : 'icondoubleLeft';
+        const arrow = panel.querySelector('[class*="' + cls + '"], [class*="next-year"], [class*="prev-year"]');
+        if (!arrow) break;
+        arrow.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await sleep(160);
+        guard++;
+      }
+      if (curYear() !== targetY) return false;
+      // 4. 月份: 点月份项
+      let hit = null;
+      panel.querySelectorAll('[class*="year-item"],[class*="month-item"],[class*="cell"],li').forEach((it) => {
+        if (!hit && (it.textContent || '').trim() === MONTHS[targetM - 1]) hit = it;
+      });
+      if (!hit) return false;
+      hit.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await sleep(300);
+      return true;
+    } catch (e) { return false; }
   }
 
   // 证件照自动上传(DataTransfer 赋值, 部分站点受限则报 infos)
@@ -316,6 +381,14 @@
         case 'text': {
           // 只读组件(自定义下拉/日期组件): 尝试弹层点击 + 输入
           if (el.readOnly) {
+            // 日期组件(出生日期/生日等年月面板): 点箭头切年 + 选月
+            if (/(出生日期|生日|出生年月|日期)/.test(el.placeholder || '')) {
+              const d = AS.dates.parseDateStr(String(value));
+              if (d) {
+                const ok = await fillYearMonthPanel(el, AS.dates.formatDate(d, 'yyyy-mm'));
+                if (ok) return { ok: true, action: 'filled', detail: '日期面板选择完成' };
+              }
+            }
             const ok = await fillCustom(el, el, value);
             if (ok) return { ok: true, action: 'filled', detail: '组件选择完成' };
             // 兜底: 直接写值并触发事件(部分框架可接受)

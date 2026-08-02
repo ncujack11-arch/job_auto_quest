@@ -272,7 +272,9 @@
         highlight(field.el, 'af-highlight-ok');
         memPush(sel, fieldKey);
         // 填充后生效校验: 文本类字段声明成功但值未真正写入 → 标记"未生效"
-        if ((field.type === 'text' || field.type === 'textarea') && origValue && String(field.el.value) !== String(origValue)) {
+        // (组件自动补全如 出生日期+年龄 "(25岁)" 前缀一致视为已生效)
+        const curVal = String(field.el.value || '');
+        if ((field.type === 'text' || field.type === 'textarea') && origValue && curVal !== String(origValue) && !curVal.startsWith(String(origValue))) {
           report.notEffective = (report.notEffective || 0) + 1;
           report.unmatchedItems.push({ signature: fctx.name || fctx.id || label, label, reason: '已填充但值未生效(框架限制)' });
           unmatchedEls.push({ el: field.el, label });
