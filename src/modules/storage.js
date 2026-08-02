@@ -34,6 +34,9 @@
     previewMode: true,           // 填充前预览确认
     siteFilter: { mode: 'all', blacklist: [], whitelist: [] },  // 域名黑白名单
     autoNext: false,             // 多页表单自动下一步续填(默认关, 绝不自动提交)
+    autoAgreeProtocol: true,     // 自动勾选用户协议/隐私政策复选框
+    rightClickCopy: true,        // 输入框右键快速复制字段值菜单
+    autoScroll: true,            // 填充时自动滚动到当前字段
     photoDataUrl: '',            // 证件照 dataURL(可选, 用于自动上传)
     refCodes: [],                // 内推码库 [{host, code}]
     autoLock: true,              // 闲置 5 分钟自动锁定(清除会话密钥)
@@ -357,28 +360,49 @@
   async function getReusePayload() { return (await get(KEYS.REUSE, null)) || null; }
   async function clearReusePayload() { await set(KEYS.REUSE, null); }
 
-  // ---------- 选择器记忆 (同一域名填充成功后记忆 选择器→字段) ----------
+  // ---------- 选择器记忆 (同招聘系统跨站共享 + 域名专属)
+  // 键: 'sys:<规则id>' 系统级共享(如 sys:rule_moka, 所有 MOKA 公司域名共用)
+  //      '<host>' 域名级专属(精确覆盖)
+  async function getSystemKeyForHost(host) {
+    try {
+      const list = await getSiteRules();
+      const h = String(host || '').toLowerCase();
+      const rule = list.find((r) => r.enabled !== false && r.host && h.endsWith(r.host.toLowerCase().replace(/^\*\./, '')));
+      return rule ? 'sys:' + rule.id : String(host || '').toLowerCase();
+    } catch (e) { return String(host || '').toLowerCase(); }
+  }
   async function getSiteMemories() { return (await get(KEYS.SITE_MEMORIES, {})) || {}; }
   async function saveSiteMemories(map) { await set(KEYS.SITE_MEMORIES, map || {}); }
   async function getMemoriesForHost(host) {
     const map = await getSiteMemories();
-    return map[String(host || '').toLowerCase()] || null;
+    const h = String(host || '').toLowerCase();
+    const sysKey = await getSystemKeyForHost(host);
+    // 双维度合并: 系统级共享记忆 + 域名级专属记忆(专属覆盖)
+    const hostMem = map[h] || {};
+    const sysMem = sysKey !== h ? (map[sysKey] || {}) : {};
+    const merged = Object.assign({}, sysMem, hostMem);
+    return Object.keys(merged).length ? merged : null;
   }
   async function addMemory(host, selector, fieldKey) {
     const map = await getSiteMemories();
     const h = String(host || '').toLowerCase();
-    if (!map[h]) map[h] = {};
-    map[h][selector] = fieldKey;
-    // 单域名记忆上限, 防膨胀
-    const keys = Object.keys(map[h]);
-    if (keys.length > 400) {
-      keys.slice(0, keys.length - 400).forEach((k) => delete map[h][k]);
-    }
+    const sysKey = await getSystemKeyForHost(host);
+    // 同时写入系统级(共享)与域名级(专属)
+    const keys = new Set([sysKey, h]);
+    keys.forEach((k) => {
+      if (!map[k]) map[k] = {};
+      map[k][selector] = fieldKey;
+      const ks = Object.keys(map[k]);
+      if (ks.length > 400) ks.slice(0, ks.length - 400).forEach((kk) => delete map[k][kk]);
+    });
     await set(KEYS.SITE_MEMORIES, map);
   }
   async function clearMemoriesForHost(host) {
     const map = await getSiteMemories();
-    delete map[String(host || '').toLowerCase()];
+    const h = String(host || '').toLowerCase();
+    delete map[h];
+    const sysKey = await getSystemKeyForHost(host);
+    if (sysKey !== h) delete map[sysKey];
     await set(KEYS.SITE_MEMORIES, map);
   }
   async function countMemories() {
@@ -543,7 +567,7 @@
     getStatusFlow, saveStatusFlow,
     getReminders, saveReminders,
     setReusePayload, getReusePayload, clearReusePayload,
-    getSiteMemories, saveSiteMemories, getMemoriesForHost, addMemory, clearMemoriesForHost, countMemories,
+    getSiteMemories, saveSiteMemories, getMemoriesForHost, addMemory, clearMemoriesForHost, countMemories, getSystemKeyForHost,
     appendLog, getLogs, clearLogs,
     getQuiz, saveQuiz, addQuizItem,
     BUILTIN_TIPS, getSiteTips, saveSiteTips, getTipsForHost,

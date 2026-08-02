@@ -297,6 +297,37 @@ function t(name, cond) {
   const mem2 = await AS.storage.getMemoriesForHost('test2.com');
   t('记忆新增', mem2 && mem2['#name'] === 'basic.name');
 
+  console.log('== 同招聘系统规则跨站复用 ==');
+  // mokahr.com 命中内置 MOKA 规则 → 系统级共享记忆
+  await AS.storage.addMemory('a.mokahr.com', '.f1', 'basic.name');
+  await AS.storage.addMemory('b.mokahr.com', '.f2', 'basic.phone');
+  const memA = await AS.storage.getMemoriesForHost('a.mokahr.com');
+  const memB = await AS.storage.getMemoriesForHost('b.mokahr.com');
+  t('同系统跨站: A 公司可用 B 公司记忆', memA && memA['.f2'] === 'basic.phone');
+  t('同系统跨站: B 公司可用 A 公司记忆', memB && memB['.f1'] === 'basic.name');
+  t('系统键为规则级(sys:rule_moka)', (await AS.storage.getSystemKeyForHost('c.mokahr.com')) === 'sys:rule_moka');
+  // 无规则域名: 域名级隔离
+  await AS.storage.addMemory('x.example.com', '.x1', 'basic.name');
+  const memX = await AS.storage.getMemoriesForHost('x.example.com');
+  t('非规则域名: 域名级隔离', memX && memX['.x1'] === 'basic.name' && !memX['.f2']);
+
+  console.log('== 设置默认项(实用优化开关) ==');
+  const s = await AS.storage.getSettings();
+  t('autoAgreeProtocol 默认开启', s.autoAgreeProtocol === true);
+  t('rightClickCopy 默认开启', s.rightClickCopy === true);
+  t('autoScroll 默认开启', s.autoScroll === true);
+
+  console.log('== 败因标记与统计 ==');
+  const app1 = await AS.apps.createRecord({ company: 'A公司', position: '后端', status: '已回绝', failReason: { label: '一面挂', note: '表现不佳' } });
+  const app2 = await AS.apps.createRecord({ company: 'B公司', position: '前端', status: '已回绝', failReason: { label: '笔试挂', note: '' } });
+  const app3 = await AS.apps.createRecord({ company: 'C公司', position: '算法', status: '笔试中' });
+  const stats = AS.stats.compute(await AS.storage.getApplications(), AS.storage.DEFAULT_STATUS_FLOW);
+  const reasonMap = {};
+  stats.records.forEach((r) => { if (r.failReason && r.failReason.label) reasonMap[r.failReason.label] = (reasonMap[r.failReason.label] || 0) + 1; });
+  t('败因标签统计(一面挂1/笔试挂1)', reasonMap['一面挂'] === 1 && reasonMap['笔试挂'] === 1);
+  t('无败因记录不计入', !reasonMap['一面挂'] || reasonMap['一面挂'] === 1);
+  t('stats.records 字段存在', Array.isArray(stats.records) && stats.records.length === 3);
+
   console.log('== 学习链路: 收集去重 → 后台保存 ==');
   const learnProfile = {
     id: 'p-learn', name: '学习测试', data: {

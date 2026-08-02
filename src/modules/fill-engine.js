@@ -176,6 +176,10 @@
       if (total > 3 && done % 2 === 0) showProgress(done, total, '正在填充');
       setFillState('filling', `正在填充 ${done}/${total}: ${label || fieldKey || '字段'}`);
       if (!fctx.visible) continue;
+      // 填充自动滚动跟随: 滚动到当前正在填写的字段(设置可关闭)
+      if (!opts || opts.autoScroll !== false) {
+        try { field.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* ignore */ }
+      }
       const snap = snapshotField(field);
       if (snap) snapshots.push(snap);
 

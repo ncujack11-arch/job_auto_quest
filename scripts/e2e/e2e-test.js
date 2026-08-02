@@ -242,10 +242,17 @@ const t = (name, ok, extra) => { if (ok) { pass++; console.log('  ✔', name); }
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
       flushMemories: async () => {},
     });
-    return report;
+    // 协议复选框自动勾选(生产函数)
+    const agreed = AS.filler.fillAgreementCheckboxes();
+    return { report, agreed };
   });
-  console.log('  填充报告:', JSON.stringify(fillResult));
-  t('填充至少命中 1 个字段', fillResult.filled >= 1);
+  console.log('  填充报告:', JSON.stringify(fillResult.report));
+  t('填充至少命中 1 个字段', fillResult.report.filled >= 1);
+  const agreeChecked = await page.evaluate(() => {
+    const cb = document.querySelector('[data-test="agreement.protocol"]');
+    return cb ? cb.checked : false;
+  });
+  t('协议复选框自动勾选', agreeChecked === true, agreeChecked);
 
   const pageAfter = await page.evaluate((tests) => {
     const out = {};

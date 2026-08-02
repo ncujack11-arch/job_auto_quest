@@ -80,6 +80,11 @@
     chartFail.appendChild(UI().el('canvas', { height: '220' }));
     grid.appendChild(chartFail);
 
+    const chartFailReason = UI().el('div', { class: 'chart-card' });
+    chartFailReason.appendChild(UI().el('h4', { text: '败因标签分布(标记挂时选择)' }));
+    chartFailReason.appendChild(UI().el('canvas', { height: '220' }));
+    grid.appendChild(chartFailReason);
+
     const chartIndustry = UI().el('div', { class: 'chart-card' });
     chartIndustry.appendChild(UI().el('h4', { text: '公司行业分布' }));
     chartIndustry.appendChild(UI().el('canvas', { height: '220' }));
@@ -139,6 +144,18 @@
 
         const failData = { labels: s.failureStages.map(([k]) => k), values: s.failureStages.map(([, v]) => v) };
         AS.charts.drawBars(chartFail.querySelector('canvas'), Object.assign({ horizontal: true, colors: ['#dc2626', '#d97706', '#db2777', '#7c3aed', '#2563eb', '#0891b2'] }, failData));
+
+        // 败因标签分布(标记失败时选择的快捷标签)
+        const reasonMap = {};
+        (s.records || []).forEach((r) => {
+          if (r.failReason && r.failReason.label) {
+            const k = r.failReason.label;
+            reasonMap[k] = (reasonMap[k] || 0) + 1;
+          }
+        });
+        const reasonData = { labels: Object.keys(reasonMap), values: Object.values(reasonMap) };
+        AS.charts.drawBars(chartFailReason.querySelector('canvas'), Object.assign({ horizontal: true, colors: ['#dc2626', '#f97316', '#eab308', '#0891b2', '#2563eb', '#7c3aed', '#14b8a6', '#64748b'] }, reasonData));
+        if (!Object.keys(reasonMap).length) chartFailReason.querySelector('canvas').parentElement.appendChild(UI().el('div', { class: 'view-sub', style: 'padding:10px', text: '暂无败因标记。台账中点击「挂」按钮或切换为已回绝状态时选择败因标签, 此处自动汇总。' }));
 
         const indData = { labels: s.byIndustry.map(([k]) => k), values: s.byIndustry.map(([, v]) => v) };
         AS.charts.drawBars(chartIndustry.querySelector('canvas'), Object.assign({ horizontal: true }, indData));

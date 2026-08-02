@@ -43,10 +43,11 @@ const FIELDS = {
   'education.major': { labels: ['专业名称', '专业'], types: ['text'], pool: MAJOR_POOL, entry: 'education' },
   'education.degree': { labels: ['学历', '最高学历'], types: ['select'], pool: ['博士', '硕士', '本科', '大专'], entry: 'education' },
   'openQuestions.intro': { labels: ['自我介绍', '请做一下自我介绍', '个人简介'], types: ['textarea'], pool: ['热爱技术, 学习能力强, 团队协作好。', '责任心强, 追求极致, 持续学习。'] },
+  'agreement.protocol': { labels: ['我已阅读并同意用户协议与隐私政策'], types: ['agree'], pool: [] },
 };
 
 // 每次固定取这些字段: 必含 6 个(fixed) + 随机池选 7-9 个
-const FIXED = ['basic.name', 'basic.phone', 'basic.email', 'basic.gender', 'education.school', 'openQuestions.intro', 'intent.expectedSalary'];
+const FIXED = ['basic.name', 'basic.phone', 'basic.email', 'basic.gender', 'education.school', 'openQuestions.intro', 'intent.expectedSalary', 'agreement.protocol'];
 const RANDOM_POOL = Object.keys(FIELDS).filter((k) => !FIXED.includes(k));
 
 function esc(s) { return String(s).replace(/"/g, '&quot;'); }
@@ -95,6 +96,9 @@ function renderField(key, def, fillValue, orderIdx) {
       const opts = (def.selectOpts || []).map((o) => `<option>${o}</option>`).join('');
       return `<div class="row">${labelHtml}<select ${testAttr}><option value="">请选择</option>${opts}</select>
         <input type="text" data-test="${key}.input" placeholder="或直接输入" style="flex:1"></div>`;
+    }
+    case 'agree': {
+      return `<div class="row">${labelHtml}<span><label style="width:auto"><input type="checkbox" data-test="agreement.protocol"> 我已阅读并同意《用户协议》与《隐私政策》</label></span></div>`;
     }
     default: return '';
   }

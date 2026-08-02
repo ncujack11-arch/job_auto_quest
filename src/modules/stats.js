@@ -114,7 +114,7 @@
       writtenRate: written ? Math.round((interviews / written) * 100) : 0,
       interviewRate: interviews ? Math.round((offers / interviews) * 100) : 0,
       byStatus, byChannel, byCategory, byIndustry, trendDaily, failureStages,
-      salaryDist, timeline,
+      salaryDist, timeline, records,
     };
   }
 

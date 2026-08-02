@@ -249,10 +249,56 @@
     chrome.runtime.sendMessage({ type: 'AF_SYNC_REMINDERS' });
   }
 
+  // ---------- 败因快速打标: 标记「挂」时弹出快捷标签 + 一句话备注 ----------
+  const FAIL_REASONS = ['笔试挂', '一面挂', '二面挂', 'HR面挂', '学历不符', '无回应', '已读不回', '流程终止'];
+  function openFailReasonModal(app) {
+    const modal = UI().el('div', { class: 'modal-mask' }, [UI().el('div', { class: 'modal', style: 'width:min(460px,92vw)' }, [])]);
+    const box = modal.querySelector('.modal');
+    box.appendChild(UI().el('h2', { text: `标记失败 — ${app.company || '未命名'} ${app.position || ''}` }));
+    box.appendChild(UI().el('p', { class: 'view-sub', text: '选择败因标签(可自定义), 支持一句话备注, 统计看板会自动汇总败因分布。' }));
+
+    const labelWrap = UI().el('div', { style: 'display:flex;flex-wrap:wrap;gap:8px;margin:12px 0' });
+    let selected = '';
+    FAIL_REASONS.forEach((r) => {
+      const chip = UI().el('button', {
+        class: 'status-chip', style: 'padding:4px 12px;border:1px solid #e2e8f0;border-radius:14px;background:#fff;cursor:pointer;font-size:12.5px;color:#475569',
+        text: r, onclick: () => {
+          selected = r;
+          labelWrap.querySelectorAll('.status-chip').forEach((c) => { c.style.borderColor = '#e2e8f0'; c.style.background = '#fff'; });
+          chip.style.borderColor = '#dc2626'; chip.style.background = '#fef2f2';
+        },
+      });
+      labelWrap.appendChild(chip);
+    });
+    box.appendChild(labelWrap);
+
+    const customInput = UI().el('input', { type: 'text', placeholder: '或自定义败因(如: 时间冲突放弃/简历未过筛)' });
+    const noteInput = UI().el('textarea', { placeholder: '一句话备注(选填): 如 笔试只做了一半 / 面试表现不佳...', style: 'min-height:54px' });
+    box.appendChild(UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '自定义标签' }), customInput]));
+    box.appendChild(UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '败因备注' }), noteInput]));
+
+    box.appendChild(UI().el('div', { class: 'modal-foot' }, [
+      UI().el('button', { class: 'btn', text: '取消', onclick: () => modal.remove() }),
+      UI().el('button', {
+        class: 'btn danger', text: '标记失败', onclick: async () => {
+          const label = (customInput.value || '').trim() || selected;
+          if (!label) { UI().toast('请选择或填写败因标签', 'error'); return; }
+          app.failReason = { label, note: (noteInput.value || '').trim(), time: Date.now() };
+          await AS.apps.setStatus(app.id, '已回绝');
+          modal.remove();
+          UI().toast(`已标记「${label}」`, 'success');
+          await reload();
+          renderAll();
+        },
+      }),
+    ]));
+    document.body.appendChild(modal);
+  }
+
   function statusSelect(app, onChange) {
     const wrap = UI().el('div', { style: 'display:flex;flex-direction:column;gap:4px;min-width:150px' });
     const row1 = UI().el('div', { style: 'display:flex;gap:4px' });
-    // 快捷状态按钮: 点一下即切换并记录时间
+    // 快捷状态按钮: 点一下即切换并记录时间; 「挂」弹出败因快速打标
     const QUICK = [['笔试', '笔试中'], ['一面', '一面'], ['二面', '二面'], ['OC', 'OC'], ['挂', '已回绝']];
     QUICK.forEach(([label, status]) => {
       const chip = UI().el('button', {
@@ -260,6 +306,7 @@
         style: 'font-size:10.5px;padding:1px 7px;border:1px solid #e2e8f0;border-radius:9px;background:#fff;cursor:pointer;color:#475569',
         text: label,
         onclick: async () => {
+          if (label === '挂') { openFailReasonModal(app); return; }
           await AS.apps.setStatus(app.id, status);
           UI().toast(`${app.company} → ${status}`, 'success');
           await reload();
@@ -272,8 +319,10 @@
     const sel = UI().el('select', {
       style: 'padding:3px 6px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px',
       onchange: async (e) => {
-        await AS.apps.setStatus(app.id, e.target.value);
-        UI().toast(`${app.company} → ${e.target.value}`, 'success');
+        const st = e.target.value;
+        if (st === '已回绝' || st === '流程终止') { openFailReasonModal(app); sel.value = app.status; return; }
+        await AS.apps.setStatus(app.id, st);
+        UI().toast(`${app.company} → ${st}`, 'success');
         await reload();
         renderAll();
       },
@@ -281,6 +330,10 @@
     statusFlow.forEach((s) => sel.appendChild(UI().el('option', { value: s, text: s })));
     sel.value = app.status;
     wrap.appendChild(sel);
+    // 已标记败因: 列表显示标签
+    if (app.failReason && app.failReason.label) {
+      wrap.appendChild(UI().el('span', { class: 'pill', style: 'align-self:flex-start;background:#fef2f2;color:#dc2626', text: '❌ ' + app.failReason.label }));
+    }
     return wrap;
   }
 
@@ -466,6 +519,7 @@
       mk('priority', '优先级'),
       mk('salary', '薪资待遇'), mk('base', 'base 地点'), mk('contact', '联系人'),
       mk('url', '岗位链接', 'url', true),
+      (() => { app.failReasonNote = (app.failReason && app.failReason.note) || ''; return mkText('failReasonNote', '败因备注(标记失败时填写)'); })(),
       mkText('jdSnapshot', 'JD 快照'),
       mkText('notes.content', '备注 / 复盘总记'),
     ]));

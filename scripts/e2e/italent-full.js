@@ -195,6 +195,31 @@ function report(name, ok, detail) {
     return out;
   }, 90000);
   report('阶段5c 下拉窗口选择(打开+匹配)', panelCheck.opened && panelCheck.matched, panelCheck);
+  // ===== 阶段5d: 协议复选框自动勾选(真实页面) =====
+  const agreeCheck = await page.evaluate(() => {
+    const before = [];
+    document.querySelectorAll('input[type="checkbox"],[role="checkbox"],[role="switch"]').forEach((el) => {
+      let text = '';
+      try {
+        if (el.closest && el.closest('label')) text = el.closest('label').textContent || '';
+        if (!text) { let n = el; for (let i = 0; i < 3 && n; i++, n = n.parentElement) { if ((n.textContent || '').trim()) { text = n.textContent; break; } } }
+      } catch (e) {}
+      if (/协议|条款|政策|声明|须知|同意/.test(text || '')) before.push({ checked: !!el.checked, text: (text || '').replace(/\s+/g, '').slice(0, 40) });
+    });
+    const agreed = AS.filler.fillAgreementCheckboxes();
+    const after = [];
+    document.querySelectorAll('input[type="checkbox"],[role="checkbox"],[role="switch"]').forEach((el) => {
+      let text = '';
+      try {
+        if (el.closest && el.closest('label')) text = el.closest('label').textContent || '';
+        if (!text) { let n = el; for (let i = 0; i < 3 && n; i++, n = n.parentElement) { if ((n.textContent || '').trim()) { text = n.textContent; break; } } }
+      } catch (e) {}
+      if (/协议|条款|政策|声明|须知|同意/.test(text || '')) after.push({ checked: !!el.checked, text: (text || '').replace(/\s+/g, '').slice(0, 40) });
+    });
+    return { before, agreed, after };
+  }, 90000);
+  report('阶段5d 协议复选框自动勾选', agreeCheck.agreed >= 0 && agreeCheck.after.every((x) => x.checked), agreeCheck);
+
   // ===== 阶段6: 弹层清理检查("暂无选项"提示层为非交互提示, 不阻塞) =====
   // 模拟用户点击页面空白处关闭选择完成后的残留面板
   await page.mouse.click(1300, 250);

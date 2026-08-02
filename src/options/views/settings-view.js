@@ -374,6 +374,27 @@
     autoItem.appendChild(aWrap);
     card.appendChild(autoItem);
 
+    // 通用开关组(自动勾选协议 / 右键快速复制 / 自动滚动跟随)
+    const makeToggle = (label, hint, key) => {
+      const item = UI().el('div', { class: 'form-item', style: 'max-width:520px;margin-top:14px' });
+      item.appendChild(UI().el('label', { text: label }));
+      const wrap = UI().el('div', { style: 'display:flex;gap:8px;align-items:center' });
+      const check = UI().el('input', {
+        type: 'checkbox', checked: !!settings[key],
+        onchange: async (e) => {
+          settings[key] = e.target.checked;
+          await AS.storage.saveSettings(settings);
+        },
+      });
+      wrap.appendChild(check);
+      wrap.appendChild(UI().el('span', { style: 'font-size:12px;color:#6b7280', text: hint }));
+      item.appendChild(wrap);
+      card.appendChild(item);
+    };
+    makeToggle('自动勾选用户协议', '填充完成时自动勾选「我已阅读并同意用户协议/隐私政策」类复选框(严格限定协议关键词, 绝不误选订阅/推送等其他选项)', 'autoAgreeProtocol');
+    makeToggle('输入框右键快速复制', '在表单输入框上右键时, 弹出「快速复制」菜单, 一键复制当前方案字段值(姓名/手机号/邮箱等)到剪贴板', 'rightClickCopy');
+    makeToggle('填充自动滚动跟随', '填充过程中自动滚动页面到当前正在填写的字段, 不用手动拖滚动条', 'autoScroll');
+
     // 证件照
     const photoItem = UI().el('div', { class: 'form-item', style: 'max-width:520px;margin-top:14px' });
     photoItem.appendChild(UI().el('label', { text: '证件照(本地存储, 用于网申上传照片控件自动上传)' }));

@@ -308,6 +308,55 @@
     return false;
   }
 
+  // 协议复选框自动勾选: 严格匹配「同意/接受 + 协议/条款/政策/声明/须知」类
+  // 只勾选未勾的协议类复选框, 绝不误选其他选项(订阅/推送/营销类不含协议词)
+  function fillAgreementCheckboxes() {
+    let checked = 0;
+    const AGREE_RE = /(同意|接受|阅读并同意|已知悉|确认|勾选即代表.{0,8}(同意|接受))[^。；;]{0,16}(协议|条款|政策|声明|须知|规则|说明)|(我已阅读|我同意|本人同意|同意并)[^。；;]{0,16}(协议|条款|政策|声明)/;
+    const BLOCK_RE = /(订阅|推送|营销|广告|短信通知|邮件通知|接收.{0,6}(推送|通知)|关注公众号|接收招聘信息)/;
+    const candidates = document.querySelectorAll('input[type="checkbox"], [role="checkbox"], [role="switch"], [class*="checkbox"][class*="check"], [class*="switch"]');
+    candidates.forEach((el) => {
+      if (el.disabled) return;
+      if (el.tagName === 'INPUT' && el.checked) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return;
+      let text = '';
+      // 收集上下文文本: 包裹 label / 最近父容器 / 后兄弟
+      try {
+        if (el.closest && el.closest('label')) text = el.closest('label').textContent || '';
+        if (!text) {
+          let node = el;
+          for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
+            const t = node.textContent || '';
+            if (t.trim().length > 1) { text = t; break; }
+          }
+        }
+        if (!text && el.parentElement && el.parentElement.nextElementSibling) {
+          text = el.parentElement.nextElementSibling.textContent || '';
+        }
+      } catch (e) { /* ignore */ }
+      const clean = (text || '').replace(/\s+/g, '').slice(0, 120);
+      if (!clean || clean.length > 100) return;
+      // 严格: 必须是协议类, 且不是订阅营销类
+      if (!AGREE_RE.test(clean)) return;
+      if (BLOCK_RE.test(clean)) return;
+      try {
+        if (el.tagName === 'INPUT') {
+          if (!el.checked) {
+            el.click();
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          checked++;
+        } else {
+          const inner = el.querySelector && el.querySelector('input[type="checkbox"]');
+          if (inner) { if (!inner.checked) { inner.click(); inner.dispatchEvent(new Event('change', { bubbles: true })); } checked++; }
+          else { el.click(); checked++; }
+        }
+      } catch (e) { /* ignore */ }
+    });
+    return checked;
+  }
+
   // 年月面板日期组件(MOKA/北森 sd- 系列: 左箭头/年文本/右箭头 + 十二个月表格)
   // trigger: 只读 input; ym: 'YYYY-MM'
   async function fillYearMonthPanel(trigger, ym) {
@@ -550,5 +599,5 @@
     }
   }
 
-  AS.filler = { fillField, setNativeValue, fillSelect, fillFileUpload, fillResumeFile, insertTextFallback, VALUE_ALIASES };
+  AS.filler = { fillField, setNativeValue, fillSelect, fillFileUpload, fillResumeFile, insertTextFallback, VALUE_ALIASES, fillAgreementCheckboxes, fillPanelSelect, fillYearMonthPanel };
 })();

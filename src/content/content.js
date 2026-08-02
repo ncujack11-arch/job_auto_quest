@@ -426,6 +426,13 @@
     }
 
     await finish(snapshots, unmatchedEls, !isAuto);
+    // 自动勾选用户协议/隐私政策复选框(设置开启时, 严格匹配协议类关键词)
+    if (settings.autoAgreeProtocol !== false) {
+      try {
+        const agreed = AS.filler.fillAgreementCheckboxes();
+        if (agreed > 0) safeToast(`☑ 已自动勾选 ${agreed} 个协议复选框`, 2200);
+      } catch (e) { /* ignore */ }
+    }
     if (!isAuto) {
       AS.overlay.ensureFloatBall();
       if (settings.autoNext) autoNextLoop();
@@ -861,6 +868,101 @@
   });
 
   AS.contentMain = { doFill, grabPageInfo, collectManualInputs };
+
+  // ---------- 右键快捷复制: 输入框右键弹「快速复制」菜单, 一键复制常用字段值 ----------
+  const COPY_FIELDS = [
+    ['姓名', 'basic.name'], ['手机号', 'basic.phone'], ['邮箱', 'basic.email'], ['身份证号', 'basic.idCard'],
+    ['出生日期', 'basic.birthday'], ['籍贯', 'basic.nativePlace'], ['现居地', 'basic.currentLocation'],
+    ['政治面貌', 'basic.politicalStatus'], ['民族', 'basic.ethnicity'], ['性别', 'basic.gender'],
+    ['期望城市', 'intent.targetCity'], ['期望岗位', 'intent.targetPosition'],
+  ];
+  let copyMenuEl = null;
+  const mel = (tag, attrs, children) => {
+    const el = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach((k) => {
+      const v = attrs[k];
+      if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+      else if (k === 'text') el.textContent = v;
+      else if (k === 'onclick' || k === 'onmouseenter' || k === 'onmouseleave') el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v);
+    });
+    (children || []).forEach((c) => el.appendChild(c));
+    return el;
+  };
+  async function copyToClipboard(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        return ok;
+      } catch (e2) { return false; }
+    }
+  }
+  function closeCopyMenu() {
+    if (copyMenuEl) { copyMenuEl.remove(); copyMenuEl = null; }
+  }
+  document.addEventListener('contextmenu', async (e) => {
+    try {
+      const target = e.target.closest ? e.target.closest('input,textarea,[contenteditable="true"]') : null;
+      if (!target || !isCurrent() || window.top !== window) return;
+      const settings = await AS.storage.getSettings();
+      if (settings.rightClickCopy === false) return;
+      const profile = await AS.storage.getActiveProfile();
+      if (!profile) return;
+      // 取可复制值
+      const items = [];
+      COPY_FIELDS.forEach(([label, key]) => {
+        const [cat, f] = key.split('.');
+        const v = profile.data && profile.data[cat] ? profile.data[cat][f] : '';
+        if (v !== undefined && v !== null && String(v).trim()) items.push({ label, key, value: String(v) });
+      });
+      if (!items.length) return;
+      e.preventDefault();
+      closeCopyMenu();
+      const menu = mel('div', {
+        class: 'af-copy-menu',
+        style: { position: 'fixed', zIndex: 2147483647, minWidth: '150px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px', boxShadow: '0 6px 24px rgba(0,0,0,.12)', padding: '6px 0', fontSize: '13px', color: '#334155' },
+      });
+      menu.appendChild(mel('div', { style: { padding: '4px 14px', fontSize: '11px', color: '#94a3b8', borderBottom: '1px solid #f1f5f9', marginBottom: '4px' }, text: '⚡ 快速复制当前方案字段' }));
+      items.forEach((it) => {
+        const row = mel('div', {
+          style: { padding: '6px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'center' },
+          onmouseenter: (ev) => { ev.currentTarget.style.background = '#f8fafc'; },
+          onmouseleave: (ev) => { ev.currentTarget.style.background = ''; },
+          onclick: async () => {
+            const ok = await copyToClipboard(it.value);
+            closeCopyMenu();
+            if (window.top === window) safeToast(ok ? `已复制 ${it.label}: ${it.value.slice(0, 18)}` : '复制失败, 请手动复制', 1600);
+          },
+        });
+        row.appendChild(mel('span', { text: it.label }));
+        row.appendChild(mel('span', { style: { color: '#94a3b8', fontSize: '12px', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, text: it.value }));
+        menu.appendChild(row);
+      });
+      menu.appendChild(mel('div', {
+        style: { padding: '6px 14px', fontSize: '12px', color: '#64748b', borderTop: '1px solid #f1f5f9', marginTop: '4px', cursor: 'pointer' },
+        text: '关闭菜单(点击页面任意处)',
+        onclick: closeCopyMenu,
+      }));
+      document.body.appendChild(menu);
+      const x = Math.min(e.clientX, window.innerWidth - 190);
+      const y = Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8);
+      menu.style.left = x + 'px'; menu.style.top = Math.max(8, y) + 'px';
+      copyMenuEl = menu;
+    } catch (err) { /* ignore */ }
+  });
+  document.addEventListener('click', (e) => {
+    if (copyMenuEl && !copyMenuEl.contains(e.target)) closeCopyMenu();
+  });
+  window.addEventListener('scroll', closeCopyMenu, true);
 
   // 注入后: 显示站点避坑提示(仅顶层框架)
   if (window.top === window) {
