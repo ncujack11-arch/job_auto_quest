@@ -164,6 +164,14 @@
           }
         }
       }
+      // 5) 自定义字段匹配(学习模式自动收录的字段, 越用越全)
+      if (!fieldKey) {
+        const cm = AS.matcher.matchCustomField(ctx, profile);
+        if (cm) {
+          const vals = getValues(cm.fieldKey);
+          if (vals.length) { fieldKey = cm.fieldKey; value = vals.shift(); }
+        }
+      }
 
       if (!fieldKey || value === null || value === undefined) {
         // 未匹配字段记录(供结果面板展示与定位)
@@ -763,21 +771,37 @@
         continue;
       }
       const m = AS.matcher.matchField(ctx, rule);
-      if (!m) continue;
-      const base = m.fieldKey.replace(/\[\d+\]/g, '');
-      const [catId] = base.split('.');
-      const cat = AS.schema.findCategory(catId);
-      if (!cat || cat.repeatable || catId === 'openQuestions') continue;
-      const vals = AS.matcher.resolveValues(profile, m.fieldKey);
-      if (vals.includes(value)) continue; // 库中已有相同值
-      const dupKey = 'f|' + base + '|' + value;
-      if (seen.has(dupKey)) continue;
-      seen.add(dupKey);
-      items.push({
-        type: 'field', fieldKey: m.fieldKey, catId, key: base.split('.')[1],
-        label: ctx.labelText || ctx.placeholder || ctx.name || '未知字段',
-        value,
-      });
+      if (m) {
+        const base = m.fieldKey.replace(/\[\d+\]/g, '');
+        const [catId] = base.split('.');
+        const cat = AS.schema.findCategory(catId);
+        if (cat && !cat.repeatable && catId !== 'openQuestions') {
+          const vals = AS.matcher.resolveValues(profile, m.fieldKey);
+          if (!vals.includes(value)) { // 库中已有相同值则跳过
+            const dupKey = 'f|' + base + '|' + value;
+            if (!seen.has(dupKey)) {
+              seen.add(dupKey);
+              items.push({
+                type: 'field', fieldKey: m.fieldKey, catId, key: base.split('.')[1],
+                label: ctx.labelText || ctx.placeholder || ctx.name || '未知字段',
+                value,
+              });
+            }
+          }
+        }
+        continue;
+      }
+      // 未匹配字段 → 智能收录为自定义字段(下次遇到自动填充, 无需手动加字段)
+      const labelText = ctx.labelText || ctx.placeholder || ctx.name || '';
+      const key = labelText ? AS.fuzzy.normalize(labelText).slice(0, 20) : '';
+      if (key && key.length >= 2 && !/(验证码|captcha|滑块|校验码)/i.test(labelText)) {
+        const dup = (profile.data.custom || []).some((c) => c.key === key && c.value === value);
+        const dupKey = 'c|' + key + '|' + value;
+        if (!dup && !seen.has(dupKey)) {
+          seen.add(dupKey);
+          items.push({ type: 'custom', key, label: labelText.slice(0, 20), value });
+        }
+      }
     }
     LOG().info('content', 'learn collected', items.length, 'items in', frameLabel());
     return items;

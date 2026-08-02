@@ -53,9 +53,17 @@ async function backgroundLearnSave(profile, items, settings) {
     }
     if (it.type === 'custom') {
       d.custom = d.custom || [];
-      const dup = d.custom.some((c) => c.key === it.key && c.value === it.value);
-      if (!dup) { d.custom.push({ key: it.key || 'f' + Date.now().toString(36), label: it.label || '自定义', value: String(it.value).trim() }); saved++; }
-      else skipped.push('custom-dup');
+      const exist = d.custom.find((c) => c.key === it.key);
+      if (exist) {
+        if (String(exist.value) !== String(it.value).trim()) {
+          exist.value = String(it.value).trim();
+          exist.label = exist.label || it.label;
+          saved++;
+        }
+      } else {
+        d.custom.push({ key: it.key || 'f' + Date.now().toString(36), label: it.label || '自定义', value: String(it.value).trim() });
+        saved++;
+      }
       continue;
     }
     const base = String(it.fieldKey || '').replace(/\[\d+\]/g, '');
@@ -92,14 +100,22 @@ function collectSimulate(profile, rule, fields) {
       continue;
     }
     const m = AS.matcher.matchField(ctx, rule);
-    if (!m) continue;
-    const base = m.fieldKey.replace(/\[\d+\]/g, '');
-    const [catId] = base.split('.');
-    const cat = AS.schema.findCategory(catId);
-    if (!cat || cat.repeatable || catId === 'openQuestions') continue;
-    const vals = AS.matcher.resolveValues(profile, m.fieldKey);
-    if (vals.includes(value)) continue;
-    items.push({ type: 'field', fieldKey: m.fieldKey, catId, key: base.split('.')[1], label: ctx.labelText || 'x', value });
+    if (m) {
+      const base = m.fieldKey.replace(/\[\d+\]/g, '');
+      const [catId] = base.split('.');
+      const cat = AS.schema.findCategory(catId);
+      if (cat && !cat.repeatable && catId !== 'openQuestions') {
+        const vals = AS.matcher.resolveValues(profile, m.fieldKey);
+        if (!vals.includes(value)) items.push({ type: 'field', fieldKey: m.fieldKey, catId, key: base.split('.')[1], label: ctx.labelText || 'x', value });
+      }
+      continue;
+    }
+    // 未匹配字段 → 智能收录为自定义字段
+    const labelText = ctx.labelText || ctx.placeholder || ctx.name || '';
+    const key = labelText ? AS.fuzzy.normalize(labelText).slice(0, 20) : '';
+    if (key && key.length >= 2 && !/(验证码|captcha|滑块|校验码)/i.test(labelText)) {
+      items.push({ type: 'custom', key, label: labelText.slice(0, 20), value });
+    }
   }
   return items;
 }
@@ -168,6 +184,27 @@ function collectSimulate(profile, rule, fields) {
   ];
   const mixedItems = collectSimulate(profile, null, mixedFields);
   t('混合场景只收集 2 项新值', mixedItems.length === 2);
+
+  // 智能收录: 未匹配字段自动生成 custom 条目
+  const unknownFields = [
+    { ctx: mkCtx({ labelText: '是否愿意服从调剂' }), value: '是' },
+    { ctx: mkCtx({ labelText: '有无特殊技能爱好' }), value: '摄影' },
+  ];
+  const unknownItems = collectSimulate(profile, null, unknownFields);
+  t('智能收录: 未知字段生成 2 个 custom 条目', unknownItems.length === 2 && unknownItems.every((i) => i.type === 'custom'));
+  const r6 = await backgroundLearnSave(profile, unknownItems, settings);
+  t('智能收录: custom 条目入库', r6.saved === 2);
+  const profAfter = await AS.storage.getProfile(profile.id);
+  t('智能收录: 信息库 custom 含新字段', (profAfter.data.custom || []).some((c) => c.key === '是否愿意服从调剂' && c.value === '是'));
+  // 再次收录相同字段不同值 → 更新而非新增
+  const r7 = await backgroundLearnSave(profile, [{ type: 'custom', key: '是否愿意服从调剂', label: '是否愿意服从调剂', value: '否' }], settings);
+  const profAfter2 = await AS.storage.getProfile(profile.id);
+  t('智能收录: 同 key 更新值不重复新增', r7.saved === 1 && (profAfter2.data.custom || []).filter((c) => c.key === '是否愿意服从调剂').length === 1 && profAfter2.data.custom.find((c) => c.key === '是否愿意服从调剂').value === '否');
+  // 自定义字段参与后续填充匹配
+  const cm = AS.matcher.matchCustomField(mkCtx({ labelText: '是否愿意服从调剂' }), profAfter2);
+  t('智能收录: 自定义字段可被再次匹配填充', !!cm && cm.fieldKey === 'custom.是否愿意服从调剂');
+  const cv = AS.matcher.resolveValues(profAfter2, 'custom.是否愿意服从调剂');
+  t('智能收录: 自定义字段值解析', cv.length === 1 && cv[0] === '否');
 
   // 敏感字段加密路径
   const s2 = await AS.storage.saveSettings({ encryption: { enabled: true, salt: 's', iterations: 100, passwordHash: 'x', hint: '' } });

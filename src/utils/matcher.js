@@ -257,20 +257,41 @@
     const cat = SCHEMA().findCategory(catId);
     if (!cat || !data) return [];
 
+    // 自定义字段(需在 repeatable 分支之前, 因为 custom 分类本身是 repeatable)
+    if (catId === 'custom') {
+      const list = Array.isArray(data.custom) ? data.custom : [];
+      const targetKey = fieldKey.startsWith('custom.') ? fieldKey.slice('custom.'.length) : fieldKey;
+      const fz = FUZZY();
+      return list
+        .filter((c) => c && (fz.normalize(c.key) === fz.normalize(targetKey) || (c.label && fz.normalize(c.label) === fz.normalize(targetKey))))
+        .map((c) => c.value)
+        .filter((v) => v);
+    }
     if (cat.repeatable) {
       const list = Array.isArray(data[catId]) ? data[catId] : [];
       if (catId === 'openQuestions') return list; // 特殊处理
       return list.map((item) => (item && item[field]) || '').filter((v) => v !== '' && v !== undefined && v !== null);
     }
-    if (catId === 'custom') {
-      const list = Array.isArray(data.custom) ? data.custom : [];
-      return list
-        .filter((c) => c && (FUZZY().normalize(c.key) === FUZZY().normalize(fieldKey) || (c.key && fieldKey.includes(c.key))))
-        .map((c) => c.value)
-        .filter((v) => v);
-    }
     const v = data[catId] ? data[catId][field] : undefined;
     return v === undefined || v === null || v === '' ? [] : [String(v)];
+  }
+
+  // 自定义字段匹配: 学习模式自动收录的字段(key/label 作为关键词)参与后续填充
+  function matchCustomField(ctx, profile) {
+    const customs = (profile && profile.data && Array.isArray(profile.data.custom)) ? profile.data.custom : [];
+    if (!customs.length) return null;
+    const text = (ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id).trim();
+    if (!text) return null;
+    const fz = FUZZY();
+    for (const c of customs) {
+      if (!c || c.value === undefined || c.value === null || String(c.value).trim() === '') continue;
+      const kw = [c.key, c.label].filter(Boolean);
+      if (!kw.length) continue;
+      if (fz.containsAny(text, kw)) {
+        return { fieldKey: 'custom.' + c.key, score: 50, confidence: 'high', via: 'custom' };
+      }
+    }
+    return null;
   }
 
   // 开放题匹配: 在开放题库中找与表单字段语义最接近的问题答案
@@ -335,5 +356,5 @@
     } catch (e) { return ''; }
   }
 
-  AS.matcher = { buildContext, signatureOf, matchField, resolveValues, resolveOpenQuestion, isOpenQuestionField, genSelector, MATCH_THRESHOLD };
+  AS.matcher = { buildContext, signatureOf, matchField, matchCustomField, resolveValues, resolveOpenQuestion, isOpenQuestionField, genSelector, MATCH_THRESHOLD };
 })();

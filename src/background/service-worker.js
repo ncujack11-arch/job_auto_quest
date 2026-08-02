@@ -450,11 +450,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           }
           if (it.type === 'custom') {
             d.custom = d.custom || [];
-            const dup = d.custom.some((c) => c.key === it.key && c.value === it.value);
-            if (!dup) {
+            const exist = d.custom.find((c) => c.key === it.key);
+            if (exist) {
+              if (String(exist.value) !== String(it.value).trim()) {
+                exist.value = String(it.value).trim();
+                exist.label = exist.label || it.label;
+                saved++;
+              }
+            } else {
               d.custom.push({ key: it.key || 'f' + Date.now().toString(36), label: it.label || '自定义', value: String(it.value).trim() });
               saved++;
-            } else same++;
+            }
             continue;
           }
           const base = String(it.fieldKey || '').replace(/\[\d+\]/g, '');

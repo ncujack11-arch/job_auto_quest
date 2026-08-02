@@ -198,6 +198,25 @@ function t(name, cond) {
   }
   t('MOKA 扩展字段 8 项全部正确匹配', newFieldsFail === 0);
 
+  console.log('== 自定义字段智能学习闭环 ==');
+  const learnProfile2 = {
+    id: 'p-custom', name: '自定义测试', data: {
+      basic: {}, skills: {}, intent: {}, education: [], internship: [], project: [],
+      custom: [{ key: '是否有xxx经历', label: '是否有xxx经历', value: '是' }], openQuestions: [],
+    },
+  };
+  // 自定义字段匹配填充
+  const cm1 = AS.matcher.matchCustomField(mkM2({ labelText: '是否有xxx经历' }), learnProfile2);
+  t('自定义字段匹配: 命中并返回 custom.key', cm1 && cm1.fieldKey === 'custom.是否有xxx经历');
+  const cv = AS.matcher.resolveValues(learnProfile2, 'custom.是否有xxx经历');
+  t('自定义字段值解析', cv.length === 1 && cv[0] === '是');
+  // 智能收录: 未匹配字段生成 custom 条目
+  const cm2 = AS.matcher.matchField(mkM2({ labelText: '是否愿意服从调剂' }), null);
+  t('未收录字段不识别', cm2 === null || cm2.via === undefined);
+  // resolveValues 兼容 label 匹配
+  const cv2 = AS.matcher.resolveValues(learnProfile2, 'custom.是否有xxx经历');
+  t('custom 值解析(label 一致)', cv2[0] === '是');
+
   console.log('== parser v1.7: 清洗/名录/置信度/来源/模板 ==');
   const dirty = [
     '姓名: 王五', '电话: 13712345678', 'www.resume-site.com', '1', '第 2 页',
