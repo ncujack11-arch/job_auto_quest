@@ -598,6 +598,31 @@
     }
   }
 
+  // ---------- 笔试题库: 右键查答案 ----------
+  async function lookupQuizAnswer(text) {
+    try {
+      const quiz = await AS.storage.getQuiz();
+      const fz = AS.fuzzy;
+      const nt = fz.normalize(text);
+      let best = null;
+      for (const q of quiz) {
+        const nq = fz.normalize(q.question);
+        if (!nq) continue;
+        let score = 0;
+        if (nq && (nt.includes(nq) || nq.includes(nt))) score = 0.95;
+        else score = fz.similarity(nt, nq);
+        if (score > 0.6 && (!best || score > best.score)) best = { score, q };
+      }
+      if (best && best.q.answer) {
+        AS.overlay.toast(`📝 题库命中(相似度 ${Math.round(best.score * 100)}%):\n${best.q.answer}`, 25000);
+      } else {
+        AS.overlay.toast('题库中未找到该题, 可右键「将选中文字存入开放题库」或到配置页录入', 6000);
+      }
+    } catch (e) {
+      AS.overlay.toast('查询失败: ' + (e.message || e));
+    }
+  }
+
   // ---------- 消息路由 ----------
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || typeof msg !== 'object') return;
@@ -623,6 +648,11 @@
       case 'AF_SAVE_SELECTION':
         if (window.top === window && msg.text && msg.text.trim()) {
           saveSelectionToQuiz(msg.text.trim());
+        }
+        break;
+      case 'AF_QUIZ_LOOKUP':
+        if (window.top === window && msg.text && msg.text.trim()) {
+          lookupQuizAnswer(msg.text.trim());
         }
         break;
       case 'AF_SCAN_COUNT': {

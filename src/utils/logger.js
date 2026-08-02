@@ -28,6 +28,18 @@
     const prefix = `[AF:${tag || '?'}] ${now()}`;
     const fn = lv === 'debug' ? console.debug : lv === 'warn' ? console.warn : lv === 'error' ? console.error : console.info;
     fn(prefix, ...args);
+    // warn/error 持久化到本地日志缓冲(设置页可导出排查)
+    if ((lv === 'warn' || lv === 'error') && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      try {
+        const text = args.map((a) => (a && a.message ? a.message : a)).join(' ').slice(0, 400);
+        chrome.storage.local.get('af_logs').then((r) => {
+          const list = (r && r.af_logs) || [];
+          list.push({ t: Date.now(), lv, tag: tag || '?', msg: text });
+          while (list.length > 300) list.shift();
+          chrome.storage.local.set({ af_logs: list });
+        }).catch(() => {});
+      } catch (e) { /* ignore */ }
+    }
   }
 
   AS.logger = {

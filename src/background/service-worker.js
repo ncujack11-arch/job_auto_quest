@@ -53,6 +53,11 @@ function ensureMenus() {
         contexts: ['selection'],
       });
       chrome.contextMenus.create({
+        id: 'af-quiz-lookup',
+        title: '在本地笔试题库中查找答案',
+        contexts: ['selection'],
+      });
+      chrome.contextMenus.create({
         id: 'af-open-options',
         title: '打开插件配置页',
         contexts: ['all'],
@@ -323,6 +328,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   } else if (info.menuItemId === 'af-capture-selection') {
     if (isHttpTab(tab)) {
       chrome.tabs.sendMessage(tab.id, { type: 'AF_SAVE_SELECTION', text: info.selectionText || '' }).catch(() => {});
+    }
+  } else if (info.menuItemId === 'af-quiz-lookup') {
+    if (isHttpTab(tab)) {
+      chrome.tabs.sendMessage(tab.id, { type: 'AF_QUIZ_LOOKUP', text: info.selectionText || '' }).catch(() => {});
     }
   } else if (info.menuItemId === 'af-open-options') {
     chrome.runtime.openOptionsPage();

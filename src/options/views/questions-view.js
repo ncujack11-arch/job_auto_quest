@@ -156,6 +156,133 @@
     const listWrap = UI().el('div', { id: 'qList' });
     container.appendChild(listWrap);
     renderList(listWrap);
+
+    // ---------- 笔试题库 ----------
+    container.appendChild(UI().el('h3', { style: 'margin:20px 0 6px', text: '📚 笔试题库(行测/笔试/编程题)' }));
+    container.appendChild(UI().el('p', { class: 'view-sub', text: '做题时自动识别页面题目并弹答案; 也可右键选中题目选择「在本地笔试题库中查找答案」。' }));
+    const quizBox = UI().el('div', { id: 'quizBox' });
+    container.appendChild(quizBox);
+    await renderQuiz(quizBox);
+  }
+
+  // ---------- 笔试题库管理 ----------
+  async function renderQuiz(wrap) {
+    const quiz = await AS.storage.getQuiz();
+    let kw = '';
+    wrap.innerHTML = '';
+    const toolbar = UI().el('div', { class: 'toolbar' });
+    const search = UI().el('input', {
+      type: 'search', placeholder: '搜索题目...', style: 'width:200px',
+      oninput: (e) => { kw = e.target.value; renderList(); },
+    });
+    toolbar.appendChild(search);
+    toolbar.appendChild(UI().el('span', { style: 'font-size:13px;color:#6b7280', text: `共 ${quiz.length} 题` }));
+    toolbar.appendChild(UI().el('button', { class: 'btn primary', text: '＋ 新增题目', onclick: () => editQuizItem(null, renderList) }));
+    toolbar.appendChild(UI().el('button', {
+      class: 'btn', text: '📤 导出题库', onclick: () => {
+        const blob = new Blob([JSON.stringify(quiz, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `笔试题库_${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      },
+    }));
+    const fileInput = UI().el('input', { type: 'file', accept: '.json', style: 'display:none' });
+    fileInput.addEventListener('change', async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      try {
+        const data = JSON.parse(await f.text());
+        if (!Array.isArray(data)) throw new Error('格式错误');
+        if (!confirm(`导入 ${data.length} 题? 将合并到现有题库`)) return;
+        let n = 0;
+        for (const item of data) {
+          if (item && item.question && item.answer) {
+            const added = await AS.storage.addQuizItem({ id: AS.apps ? AS.apps.uid() : 'q' + Date.now().toString(36), question: item.question, answer: item.answer, category: item.category || '通用' });
+            if (added) n++;
+          }
+        }
+        UI().toast(`已导入 ${n} 题`, 'success');
+        await renderQuiz(wrap);
+      } catch (err) {
+        UI().toast('导入失败: ' + err.message, 'error');
+      }
+    });
+    toolbar.appendChild(UI().el('button', { class: 'btn', text: '📥 导入题库', onclick: () => fileInput.click() }));
+    toolbar.appendChild(fileInput);
+    wrap.appendChild(toolbar);
+
+    const listWrap = UI().el('div', { id: 'quizList' });
+    wrap.appendChild(listWrap);
+    async function renderList() {
+      const list = await AS.storage.getQuiz();
+      listWrap.innerHTML = '';
+      const k = kw.trim().toLowerCase();
+      const items = list.filter((q) => !k || ((q.question || '') + ' ' + (q.answer || '')).toLowerCase().includes(k));
+      if (!items.length) {
+        listWrap.appendChild(UI().el('div', { class: 'empty', text: '暂无题目, 点击「新增题目」录入' }));
+        return;
+      }
+      const card = UI().el('div', { class: 'card', style: 'padding:10px 14px' });
+      items.slice(0, 30).forEach((q, i) => {
+        const row = UI().el('div', { style: 'display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #f1f5f9' });
+        row.appendChild(UI().el('div', { style: 'flex:1;font-size:13px' }, [
+          UI().el('div', { text: `${i + 1}. ${q.question}` }),
+          UI().el('div', { style: 'color:#4b5563;font-size:12px;white-space:pre-wrap;margin-top:2px', text: q.answer }),
+        ]));
+        row.appendChild(UI().el('button', {
+          class: 'link-btn danger', text: '删', onclick: async () => {
+            const list2 = await AS.storage.getQuiz();
+            await AS.storage.saveQuiz(list2.filter((x) => x.id !== q.id));
+            await renderQuiz(wrap);
+          },
+        }));
+        card.appendChild(row);
+      });
+      if (items.length > 30) card.appendChild(UI().el('div', { style: 'color:#9ca3af;font-size:12px;padding:6px', text: `... 还有 ${items.length - 30} 题, 请搜索筛选` }));
+      listWrap.appendChild(card);
+    }
+    renderList();
+  }
+
+  function editQuizItem(item, onDone) {
+    const q = item || { id: 'q' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), question: '', answer: '', category: '通用' };
+    const modal = UI().el('div', { class: 'modal-mask' }, [UI().el('div', { class: 'modal' }, [])]);
+    const box = modal.querySelector('.modal');
+    box.appendChild(UI().el('h2', { text: item ? '编辑题目' : '新增题目' }));
+    const i1 = UI().el('div', { class: 'form-item' });
+    i1.appendChild(UI().el('label', { text: '题目' }));
+    const qInput = UI().el('input', { type: 'text', value: q.question });
+    qInput.addEventListener('input', (e) => { q.question = e.target.value; });
+    i1.appendChild(qInput);
+    const i2 = UI().el('div', { class: 'form-item' });
+    i2.appendChild(UI().el('label', { text: '答案 / 解析' }));
+    const aInput = UI().el('textarea', { style: 'min-height:120px' });
+    aInput.value = q.answer || '';
+    aInput.addEventListener('input', (e) => { q.answer = e.target.value; });
+    i2.appendChild(aInput);
+    const i3 = UI().el('div', { class: 'form-item' });
+    i3.appendChild(UI().el('label', { text: '分类' }));
+    const cInput = UI().el('input', { type: 'text', value: q.category || '通用' });
+    cInput.addEventListener('input', (e) => { q.category = e.target.value; });
+    i3.appendChild(cInput);
+    box.appendChild(i1);
+    box.appendChild(i2);
+    box.appendChild(i3);
+    box.appendChild(UI().el('div', { class: 'modal-foot' }, [
+      UI().el('button', { class: 'btn', text: '取消', onclick: () => modal.remove() }),
+      UI().el('button', {
+        class: 'btn primary', text: '保存', onclick: async () => {
+          if (!q.question || !q.answer) return UI().toast('请填写题目与答案', 'error');
+          await AS.storage.addQuizItem(q);
+          modal.remove();
+          UI().toast('已保存', 'success');
+          onDone && onDone();
+        },
+      }),
+    ]));
+    document.body.appendChild(modal);
   }
 
   AS.views = AS.views || {};

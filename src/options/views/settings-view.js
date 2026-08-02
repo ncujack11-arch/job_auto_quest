@@ -544,6 +544,27 @@
     item.appendChild(sel);
     form.appendChild(item);
     card.appendChild(form);
+    const toolbar = UI().el('div', { class: 'toolbar' });
+    toolbar.appendChild(UI().el('button', {
+      class: 'btn', text: '📤 导出本地日志(warn/error)', onclick: async () => {
+        const logs = await AS.storage.getLogs();
+        const text = logs.map((l) => `${new Date(l.t).toISOString()} [${l.lv}] ${l.tag}: ${l.msg}`).join('\n');
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `插件日志_${new Date().toISOString().slice(0, 10)}.log`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        UI().toast(`已导出 ${logs.length} 条日志`, 'success');
+      },
+    }));
+    toolbar.appendChild(UI().el('button', {
+      class: 'btn danger', text: '清空日志', onclick: async () => {
+        await AS.storage.clearLogs();
+        UI().toast('日志已清空', 'success');
+      },
+    }));
+    card.appendChild(toolbar);
   }
 
   function renderAbout(card) {
