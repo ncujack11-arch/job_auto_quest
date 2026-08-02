@@ -139,13 +139,13 @@
   const SECTION_RE = /^(基本信息|个人信息|教育经历|教育背景|实习经历|实习经验|工作经历|工作经验|项目经历|项目经验|专业技能|技能证书|技能|证书|获奖经历|所获荣誉|荣誉奖项|自我评价|个人评价|求职意向|校园经历|培训经历|语言能力)$/;
 
   function cleanLine(s) {
-    return String(s || '').replace(/[\u3000\s·•●◆→·▪\-–—]+/g, ' ').trim().replace(/\s+/g, ' ');
+    return String(s || '').replace(/[\u3000\s·•●◆→▪]+/g, ' ').trim().replace(/\s+/g, ' ');
   }
 
   function matchDateRange(s) {
-    const m = String(s).match(/(20\d{2})\s*[年.\/]?\s*(\d{1,2})?\s*月?\s*[-—~至到]\s*(20\d{2})\s*[年.\/]?\s*(\d{1,2})?\s*月?/);
+    const m = String(s).match(/((?:19|20)\d{2})\s*[年.\/]?\s*(\d{1,2})?\s*月?\s*[-—~至到]\s*((?:19|20)\d{2})\s*[年.\/]?\s*(\d{1,2})?\s*月?/);
     if (m) return { startY: m[1], startM: m[2] || '', endY: m[3], endM: m[4] || '' };
-    const m2 = String(s).match(/(20\d{2})\s*[年.\/]?\s*(\d{1,2})?\s*月?\s*[-—~至到]\s*(?:至今|现在|目前|now|present|今)/i);
+    const m2 = String(s).match(/((?:19|20)\d{2})\s*[年.\/]?\s*(\d{1,2})?\s*月?\s*[-—~至到]\s*(?:至今|现在|目前|now|present|今)/i);
     if (m2) return { startY: m2[1], startM: m2[2] || '', endY: '至今', endM: '' };
     return null;
   }
@@ -212,7 +212,7 @@
         if (idM) { setBasic('idCard', idM[0], 'high'); continue; }
         const gM = line.match(/(?:性别|sex|gender)\s*[:：]\s*(男|女)/i);
         if (gM) { setBasic('gender', gM[1] === '男' ? '男' : '女', 'high'); continue; }
-        const bM = line.match(/(?:出生(?:日期|年月|时间)?|birthday|date\s*of\s*birth)\s*[:：]?\s*(20\d{2}\s*[年.\/]\s*\d{1,2}\s*月?(?:\s*\d{1,2}\s*日?)?)/i);
+        const bM = line.match(/(?:出生(?:日期|年月|时间)?|birthday|date\s*of\s*birth)\s*[:：]?\s*(((?:19|20)\d{2})\s*[年.\/]\s*\d{1,2}\s*月?(?:\s*\d{1,2}\s*日?)?)/i);
         if (bM) { setBasic('birthday', bM[1].replace(/\s+/g, ''), 'high'); continue; }
         const npM = line.match(/(?:籍贯|出生地|户籍|hometown|native\s*place)\s*[:：]\s*(\S{2,20})/i);
         if (npM) { setBasic('nativePlace', npM[1], 'medium'); continue; }
@@ -236,13 +236,13 @@
             Object.keys(pendingEdu).forEach((k) => { if (pendingEdu[k]) conf['education.school'] = conf['education.school'] || 'medium'; });
           }
           pendingEdu = { school: '', degree: '', major: '', eduStart: `${range.startY}${range.startM ? '-' + range.startM : ''}`, eduEnd: range.endY === '至今' ? '' : `${range.endY}${range.endM ? '-' + range.endM : ''}` };
-          const rest = line.replace(/\s*20\d{2}[^\s]{0,20}[-—~至到][^\s]{0,20}\s*/g, ' ');
+          const rest = line.replace(/^\s*((?:19|20)\d{2}).*?[-—~至到].*?((?:19|20)\d{2})\S*\s*/, ' ');
           if (rest) {
             const schoolM = rest.match(/([\u4e00-\u9fa5A-Za-z0-9·]+?(?:大学|学院|学校|研究院|科学院|学院校|大学院校))/);
             if (schoolM) pendingEdu.school = schoolM[1];
             const deg = guessDegree(rest);
             if (deg) pendingEdu.degree = deg;
-            const rest2 = rest.replace(schoolM ? schoolM[0] : '', '').replace(/[\u4e00-\u9fa5]*(大学|学院)/, '');
+            const rest2 = rest.replace(schoolM ? schoolM[0] : '', '').replace(/(博士|硕士|本科|学士|大专|专科|高职|研究生)/g, '').replace(/[\u4e00-\u9fa5]*(大学|学院)/, '');
             pendingEdu.major = rest2.replace(/^[·|｜\s]*/, '').slice(0, 40);
           }
           continue;
@@ -271,7 +271,7 @@
             workContent: '', achievements: '',
           };
           if (range) { pendingInt.intStart = `${range.startY}${range.startM ? '-' + range.startM : ''}`; pendingInt.intEnd = range.endY === '至今' ? '' : `${range.endY}${range.endM ? '-' + range.endM : ''}`; }
-          const rest = line.replace(/20\d{2}[^\s]{0,20}[-—~至到][^\s]{0,20}/g, '');
+          const rest = line.replace(/^\s*((?:19|20)\d{2}).*?[-—~至到].*?((?:19|20)\d{2})\S*\s*/, ' ');
           const companyM = rest.match(/([\u4e00-\u9fa5A-Za-z0-9·（）()]+?(?:公司|集团|科技|网络|银行|证券|保险|事务所|研究院|中心|部|局))/) || rest.match(/^([\u4e00-\u9fa5A-Za-z0-9·（）()]{2,30})$/);
           if (companyM) pendingInt.intCompany = companyM[1];
           const posM = rest.match(/(?:担任|任职|岗位|职位|实习)\s*[:：]?\s*([\u4e00-\u9fa5A-Za-z0-9/（）()]{2,20})/);

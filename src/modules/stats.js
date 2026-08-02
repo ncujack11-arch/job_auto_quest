@@ -18,7 +18,7 @@
     const rejects = records.filter((r) => r.status === '已回绝').length;
     const terminated = records.filter((r) => r.status === '流程终止').length;
     const inProcess = records.filter((r) => !TERMINAL_STATUS.includes(r.status) && r.status !== 'Offer').length;
-    const written = records.filter((r) => r.status.includes('笔试') || AS.apps.milestones(r).writtenAt).length;
+    const written = records.filter((r) => r.status === '笔试中' || AS.apps.milestones(r).writtenAt).length;
     const interviews = records.filter((r) => (AS.apps.milestones(r).interviewCount || 0) > 0 || /面|OC|HR/.test(r.status)).length;
 
     // 分布
