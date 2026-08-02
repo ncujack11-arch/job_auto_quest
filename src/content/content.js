@@ -106,12 +106,15 @@
       const hit = (list || []).find((r) => r && r.host && h === r.host.toLowerCase());
       return hit ? hit.code : '';
     };
+    const unmatchedFields = [];
 
     for (const field of fields) {
       if (seenFields.has(field.el)) continue;
       seenFields.add(field.el);
       const ctx = AS.matcher.buildContext(field.el);
       if (!ctx.visible) continue;
+      // 国际区号/前缀框(如 +86): 无 placeholder 且前文本是纯数字区号 → 跳过
+      if (!ctx.placeholder && /^\+?\d{1,4}$/.test((ctx.prevText || '').trim())) continue;
 
       let fieldKey = null;
       let value = null;
@@ -162,12 +165,21 @@
         }
       }
 
-      if (!fieldKey || value === null || value === undefined) continue;
+      if (!fieldKey || value === null || value === undefined) {
+        // 未匹配字段记录(供结果面板展示与定位)
+        unmatchedFields.push({
+          signature: ctx.name || ctx.id || ctx.labelText || ctx.placeholder || '未知字段',
+          label: ctx.labelText || ctx.placeholder || ctx.name || '未知字段',
+          reason: !fieldKey ? '未匹配到信息库字段' : '信息库无对应值',
+          el: field.el,
+        });
+        continue;
+      }
       if (!catAllowed(fieldKey)) continue;
       const label = ctx.labelText || ctx.placeholder || ctx.name || ctx.id || '未知字段';
       items.push({ field, fieldKey, value, label, ctx, sel: AS.matcher.genSelector(field.el) });
     }
-    return { items, valueQueues, seenFields };
+    return { items, valueQueues, seenFields, unmatchedFields };
   }
 
   // ---------- 执行填充计划 ----------
@@ -307,6 +319,21 @@
   async function doFill(msg) {
     LOG().info('content', 'fill requested in', frameLabel(), frame());
     const t0 = Date.now();
+    try {
+      await doFillInner(msg, t0);
+    } catch (e) {
+      LOG().error('content', 'doFill failed', e);
+      try {
+        AS.overlay.toast('填充异常: ' + (e && e.message ? e.message.slice(0, 80) : e));
+      } catch (e2) { /* ignore */ }
+      chrome.runtime.sendMessage({
+        type: 'AF_FILL_DONE',
+        payload: { filled: 0, skipped: 0, unmatched: 0, errors: 1, total: 0, unmatchedItems: [{ label: '内部错误', reason: (e && e.message) || String(e) }], infos: [] },
+      }).catch(() => {});
+    }
+  }
+
+  async function doFillInner(msg, t0) {
     const sections = msg && msg.sections && msg.sections.length ? msg.sections : null;
     const isAuto = !!(msg && msg.auto);
 
@@ -378,8 +405,25 @@
       }
     }
 
-    let plan = buildPlan(AS.scanner.scan(), profile, rule, memories, reuseActive, sections, valueQueues, expOrder || null, settings.refCodes);
+    const scannedFields = AS.scanner.scan();
+    report.total = scannedFields.length;
+    let plan = buildPlan(scannedFields, profile, rule, memories, reuseActive, sections, valueQueues, expOrder || null, settings.refCodes);
     plan.items.forEach((it) => seenFields.add(it.field.el));
+    // 未匹配字段计入报告(供结果面板展示与点击定位)
+    plan.unmatchedFields.forEach((u) => {
+      report.unmatched++;
+      report.unmatchedItems.push({ signature: u.signature, label: u.label, reason: u.reason });
+    });
+    if (!plan.items.length) {
+      // 完全没有可填充字段: 明确反馈, 避免"没反应"
+      if (report.unmatched > 0) {
+        AS.overlay.showSummary(report, null, plan.unmatchedFields.map((u) => ({ el: u.el, label: u.label })));
+      } else {
+        AS.overlay.toast(`未在页面找到可填充的表单字段(扫描 ${scannedFields.length} 个元素)`);
+      }
+      chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }).catch(() => {});
+      return;
+    }
 
     const finish = async (snapshots, unmatchedEls, withPanel) => {
       LOG().info('content', 'fill done in ' + frameLabel(), { filled: report.filled, unmatched: report.unmatched, took: (Date.now() - t0) + 'ms' });

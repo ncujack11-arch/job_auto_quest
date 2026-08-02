@@ -87,6 +87,9 @@
       if (!inFormLikeContext(el)) return;
       if (TEXT_TYPES.includes(t)) {
         if (t === 'password') return; // 绝不处理密码框
+        // 跳过搜索框/导航类输入(如 MOKA 首页"输入职位关键字")
+        const cls = ((el.className || '').toString() || '');
+        if (/search/i.test(cls) && /(关键字|搜索)/.test(el.placeholder || '')) return;
         handle(el, 'text', { inputType: t, readonlyComponent: !!el.readOnly });
       } else if (DATE_TYPES.includes(t)) {
         handle(el, 'date', { inputType: t });

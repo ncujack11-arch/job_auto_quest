@@ -286,7 +286,13 @@
           const tr = truncateFor(el, fmt);
           target = tr.value;
           if (o.typing) { await simulateTyping(el, target, o.typingMin || 30, o.typingMax || 120); }
-          else { setNativeValue(el, target); }
+          else {
+            setNativeValue(el, target);
+            // 受控组件校验: 值未真正生效(React 等框架拒绝 setter)时降级为逐字模拟输入
+            if (target && String(el.value) !== target) {
+              await simulateTyping(el, target, 15, 45);
+            }
+          }
           return tr.truncated
             ? { ok: true, action: 'filled', detail: `已按长度限制截断为 ${tr.max} 字` }
             : { ok: true, action: 'filled' };

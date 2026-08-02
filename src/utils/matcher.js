@@ -112,6 +112,11 @@
           const t = cleanText(p.previousElementSibling.textContent, 16);
           if (t && t.length >= 2 && t.length <= 12 && !/\d{6,}/.test(t)) { ctx.prevText = t; break; }
         }
+        // 容器第一个子元素可能是标签(如 MOKA sd-Input 组件: label 是输入容器前的独立节点)
+        if (p.firstElementChild && p.firstElementChild !== el) {
+          const t = cleanText(p.firstElementChild.textContent, 16);
+          if (t && t.length >= 2 && t.length <= 10 && !/^\d+$/.test(t) && !/\d{6,}/.test(t)) { ctx.prevText = t; break; }
+        }
       }
     }
 
