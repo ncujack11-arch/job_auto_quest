@@ -192,11 +192,22 @@
     let done = 0;
     const total = items.length;
     if (total > 3) AS.overlay.showProgress(0, total, '正在填充');
+    // 级联选择器状态: 相同字段的连续下拉(如 籍贯: 省→市→县)依次用值的分段
+    let cascadeState = null;
 
     for (const item of items) {
       report.total++;
       done++;
-      const { field, fieldKey, value, label, ctx, sel } = item;
+      const { field, fieldKey, value: origValue, label, ctx, sel } = item;
+      let value = origValue;
+      // 级联续段: 上一字段是相同 key 的下拉且有多段剩余 → 用下一段
+      if (field.type === 'select' && cascadeState && cascadeState.key === fieldKey) {
+        const seg = cascadeState.parts.shift();
+        if (!cascadeState.parts.length) cascadeState = null;
+        value = seg;
+      } else if (field.type !== 'select') {
+        cascadeState = null;
+      }
       if (total > 3 && done % 2 === 0) AS.overlay.showProgress(done, total, '正在填充');
       setFillState('filling', `正在填充 ${done}/${total}: ${label || fieldKey || '字段'}`);
       if (!ctx.visible) continue;
@@ -244,6 +255,23 @@
         unmatchedEls.push({ el: field.el, label });
         AS.overlay.highlight(field.el, 'af-highlight');
       } else {
+        // 未匹配: 若为多段值(如 "江西 上饶市 余干县")尝试用第一段填入当前下拉, 剩余段留给下一个同键下拉(级联)
+        if (field.type === 'select' && cascadeState === null) {
+          const parts = String(origValue).split(/[\s、／/]+/).filter(Boolean);
+          if (parts.length > 1) {
+            const first = parts.shift();
+            const r2 = await AS.filler.fillField(field, first, opts);
+            if (r2.ok && r2.action === 'filled') {
+              cascadeState = { key: fieldKey, parts };
+              report.filled++;
+              AS.overlay.highlight(field.el, 'af-highlight-ok');
+              if (sel && fieldKey && !fieldKey.startsWith('reuse.') && fieldKey !== 'openQuestions') {
+                memoriesQueue.push({ sel, fieldKey });
+              }
+              continue;
+            }
+          }
+        }
         report.unmatched++;
         report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: r.detail || '未匹配' });
         unmatchedEls.push({ el: field.el, label });

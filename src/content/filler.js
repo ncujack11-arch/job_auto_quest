@@ -23,6 +23,9 @@
     '中共党员': ['中共党员', '中国共产党党员', '党员', '正式党员'],
     '共青团员': ['共青团员', '团员'],
     '应届毕业生': ['应届毕业生', '应届', '2025届', '2026届', '2027届'],
+    '是': ['是', '是的', '愿意', '服从', '同意', '参加', '有', '可以', '会', '有海外经历', '是，愿意'],
+    '否': ['否', '不是', '不愿意', '没有', '无', '不可以', '不会', '无海外经历', '否，不愿意'],
+    '汉族': ['汉族', '汉', 'han'],
   };
 
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -75,11 +78,13 @@
       const idx = candidates.findIndex((c) => c.trim() === String(value).trim());
       if (idx >= 0) hit = { index: idx, value: candidates[idx], score: 1 };
     }
-    // 日期型选项(如毕业年份)
+    // 日期型选项(如毕业年份/月份)
     if (!hit && AS.dates && AS.dates.parseDateStr(String(value))) {
       const dv = AS.dates.parseDateStr(String(value));
       hit = FUZZY().closest(AS.dates.formatDate(dv, 'yyyy'), candidates, { minScore: 0.5 }) ||
-            FUZZY().closest(AS.dates.formatDate(dv, 'yyyy-mm'), candidates, { minScore: 0.5 });
+            FUZZY().closest(AS.dates.formatDate(dv, 'yyyy-mm'), candidates, { minScore: 0.5 }) ||
+            (dv.m ? FUZZY().closest(String(dv.m), candidates, { minScore: 0.5 }) : null) ||
+            (dv.y ? FUZZY().closest(String(dv.y), candidates, { minScore: 0.5 }) : null);
     }
     if (!hit) return false;
     el.value = opts[hit.index].value;

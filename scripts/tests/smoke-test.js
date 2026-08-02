@@ -178,6 +178,26 @@ function t(name, cond) {
   const moka6 = AS.matcher.matchField(mkMoka({ name: 'mobile', rowText: '手机号' }), mokaRule);
   t('MOKA 规则: name=mobile → basic.phone', moka6 && moka6.fieldKey === 'basic.phone');
 
+  console.log('== matcher: MOKA 扩展字段(民族/海外/考研/面试城市/服从分配等) ==');
+  const mkM2 = (o) => Object.assign({ tag: 'input', type: 'text', name: '', id: '', placeholder: '', ariaLabel: '', dataTexts: [], labelText: '', rowText: '', prevText: '' }, o);
+  const newFields = [
+    ['民族', 'basic.ethnicity'],
+    ['是否有海外留学经历', 'basic.overseas'],
+    ['是否有考研/考博/出国计划', 'basic.postgradPlan'],
+    ['参加面试城市', 'intent.interviewCity'],
+    ['期望工作地点二', 'intent.targetCity2'],
+    ['是否愿意服从公司分配', 'intent.complyAssignment'],
+    ['招聘信息来源渠道', 'intent.sourceChannel'],
+    ['目前城市所在地', 'basic.currentLocation'],
+  ];
+  let newFieldsFail = 0;
+  for (const [label, expect] of newFields) {
+    const m = AS.matcher.matchField(mkM2({ labelText: label }), null);
+    const got = m ? m.fieldKey : null;
+    if (got !== expect) { newFieldsFail++; console.log('  ✘', label, '→', got, '(期望', expect + ')'); }
+  }
+  t('MOKA 扩展字段 8 项全部正确匹配', newFieldsFail === 0);
+
   console.log('== parser v1.7: 清洗/名录/置信度/来源/模板 ==');
   const dirty = [
     '姓名: 王五', '电话: 13712345678', 'www.resume-site.com', '1', '第 2 页',
