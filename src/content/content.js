@@ -225,6 +225,13 @@
         if (sel && fieldKey && !fieldKey.startsWith('reuse.') && fieldKey !== 'openQuestions') {
           memoriesQueue.push({ sel, fieldKey });
         }
+        // 填充后生效校验: 文本类字段声明成功但值未真正写入 → 标记"未生效"
+        if ((field.type === 'text' || field.type === 'textarea') && value && String(field.el.value) !== String(value)) {
+          report.notEffective = (report.notEffective || 0) + 1;
+          report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: '已填充但值未生效(框架限制)' });
+          unmatchedEls.push({ el: field.el, label });
+          AS.overlay.highlight(field.el, 'af-highlight');
+        }
       } else if (r.ok && r.action === 'skipped') {
         report.skipped++;
         AS.overlay.highlight(field.el, 'af-highlight-skip');

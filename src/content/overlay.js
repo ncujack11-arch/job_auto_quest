@@ -209,6 +209,7 @@
           h('div', { class: 'skip' }, [h('b', { text: String(skipped) }), h('span', { text: '已有内容跳过' })]),
           h('div', { class: 'bad' }, [h('b', { text: String(bad) }), h('span', { text: '未匹配/失败' })]),
         ]),
+        summary.notEffective > 0 ? h('div', { style: 'background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:10px', text: `⚠ ${summary.notEffective} 个字段填充后未生效(受控组件限制, 已尝试多种写入方式), 请在页面中手动确认/补充` }) : null,
         bad > 0 ? [
           h('div', { class: 'af-list' }, list),
           h('div', { class: 'af-actions' }, [

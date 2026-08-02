@@ -233,6 +233,24 @@
     }
   }
 
+  // 终极降级: execCommand 原生输入(触发浏览器级 input 事件, React/Vue/自研框架均能感知)
+  async function insertTextFallback(el, text) {
+    try {
+      el.focus();
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+      setter.call(el, '');
+      if (typeof el.setSelectionRange === 'function') el.setSelectionRange(0, 0);
+      const ok = document.execCommand('insertText', false, String(text));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('blur', { bubbles: true }));
+      return ok && String(el.value) === String(text);
+    } catch (e) {
+      return false;
+    }
+  }
+
   // 主填充函数
   // field: scanner 产出的字段; value: 字符串值; opts: {typing, typingMin, typingMax, conflictMode, photoDataUrl}
   // 返回: {ok: bool, action: 'filled'|'skipped'|'info', detail}
@@ -288,9 +306,12 @@
           if (o.typing) { await simulateTyping(el, target, o.typingMin || 30, o.typingMax || 120); }
           else {
             setNativeValue(el, target);
-            // 受控组件校验: 值未真正生效(React 等框架拒绝 setter)时降级为逐字模拟输入
+            // 受控组件校验: 值未真正生效时逐级降级(逐字模拟 → execCommand 原生输入)
             if (target && String(el.value) !== target) {
               await simulateTyping(el, target, 15, 45);
+              if (String(el.value) !== target) {
+                await insertTextFallback(el, target);
+              }
             }
           }
           return tr.truncated
@@ -355,5 +376,5 @@
     }
   }
 
-  AS.filler = { fillField, setNativeValue, fillSelect, fillFileUpload, fillResumeFile, VALUE_ALIASES };
+  AS.filler = { fillField, setNativeValue, fillSelect, fillFileUpload, fillResumeFile, insertTextFallback, VALUE_ALIASES };
 })();
