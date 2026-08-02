@@ -5,7 +5,7 @@
   'use strict';
   const AS = window.AS;
 
-  const VIEWS = ['profile', 'resume', 'applications', 'questions', 'rules', 'stats', 'settings'];
+  const VIEWS = ['profile', 'resume', 'applications', 'questions', 'rules', 'stats', 'ai', 'settings'];
 
   const TITLES = {
     profile: ['信息库', '提前录入全量网申个人信息, 支持多方案切换与 JSON 备份'],
@@ -14,6 +14,7 @@
     questions: ['开放题库', '存储网申常见开放性问题答案, 支持按公司沉淀面经'],
     rules: ['站点规则', '站点表单字段映射, 针对小众网申系统手动适配'],
     stats: ['统计看板', '投递数据复盘: 核心指标、渠道分布、时间趋势、败因分析'],
+    ai: ['AI 工具', '对接本地大模型(Ollama 等): 经历定向改写、面试问题模拟, 数据不出本机'],
     settings: ['设置', '填充策略、敏感数据加密、数据备份与恢复'],
   };
 

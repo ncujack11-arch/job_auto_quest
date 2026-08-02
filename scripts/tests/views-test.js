@@ -1,4 +1,4 @@
-// 视图行为测试: apps(台账)/questions(题库)/rules(规则)/settings(设置) 实际交互
+﻿// 视图行为测试: apps(台账)/questions(题库)/rules(规则)/settings(设置) 实际交互
 'use strict';
 const path = require('path');
 const ROOT = require('path').join(__dirname, '..', '..', 'src');
@@ -151,6 +151,7 @@ load('utils/fuzzy.js');
 load('utils/dates.js');
 load('utils/matcher.js');
 load('utils/encrypt.js');
+load('utils/ai.js');
 load('modules/applications.js');
 load('modules/reminders.js');
 load('modules/stats.js');
@@ -162,13 +163,13 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 预建骨架
 const nav = new FakeEl('nav'); nav.id = 'nav'; global._idMap['nav'] = nav;
-['profile', 'resume', 'applications', 'questions', 'rules', 'stats', 'settings'].forEach((v) => { const a = new FakeEl('a'); a.dataset.view = v; nav.appendChild(a); });
+['profile', 'resume', 'applications', 'questions', 'rules', 'stats', 'ai', 'settings'].forEach((v) => { const a = new FakeEl('a'); a.dataset.view = v; nav.appendChild(a); });
 const verLabel = new FakeEl('span'); verLabel.id = 'verLabel'; global._idMap['verLabel'] = verLabel;
 const viewEl = new FakeEl('main'); viewEl.id = 'view'; global._idMap['view'] = viewEl;
 document.body.appendChild(nav); document.body.appendChild(verLabel); document.body.appendChild(viewEl);
 
 // 先注册视图再加载 options.js(触发 route)
-['options/views/apps-view.js', 'options/views/questions-view.js', 'options/views/rules-view.js', 'options/views/settings-view.js'].forEach((v) => load(v));
+['options/views/apps-view.js', 'options/views/questions-view.js', 'options/views/rules-view.js', 'options/views/settings-view.js', 'options/views/ai-view.js'].forEach((v) => load(v));
 load('options/options.js');
 
 (async () => {
@@ -304,6 +305,21 @@ load('options/options.js');
   }
   const settings2 = await AS.storage.getSettings();
   t('自动锁定开关持久化', settings2.autoLock === !autoLock);
+
+  // ===== E. AI 工具 =====
+  console.log('== AI 工具视图 ==');
+  location.hash = '#/ai';
+  await AS.optionsUI.route();
+  await delay(30);
+  view = global._idMap['view'];
+  t('AI 视图渲染(配置卡片)', (view.textContent || '').includes('本地大模型配置'));
+  t('AI 未启用时显示引导', (view.textContent || '').includes('本地大模型未启用'));
+  // 启用后显示功能卡片
+  await AS.storage.saveSettings({ ai: { enabled: true, endpoint: 'http://127.0.0.1:11434', model: 'test' } });
+  await AS.optionsUI.route();
+  await delay(30);
+  view = global._idMap['view'];
+  t('AI 启用后显示经历改写与面试模拟', (view.textContent || '').includes('经历定向改写') && (view.textContent || '').includes('面试问题模拟'));
 
   console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
   process.exit(fail ? 1 : 0);

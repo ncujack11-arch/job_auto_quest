@@ -22,7 +22,7 @@
   };
 
   const DEFAULT_SETTINGS = {
-    version: '1.10.0',
+    version: '1.10.1',
     activeProfileId: null,
     conflictMode: 'skip',        // 'skip' | 'overwrite'
     typingMode: false,           // 逐字模拟输入
@@ -34,6 +34,7 @@
     photoDataUrl: '',            // 证件照 dataURL(可选, 用于自动上传)
     refCodes: [],                // 内推码库 [{host, code}]
     autoLock: true,              // 闲置 5 分钟自动锁定(清除会话密钥)
+    ai: { enabled: false, endpoint: 'http://127.0.0.1:11434', model: 'qwen2.5:7b' },  // 本地大模型(预留接口)
     logLevel: 'info',
     encryption: { enabled: false, salt: '', iterations: 100000, passwordHash: '', hint: '' },
   };
