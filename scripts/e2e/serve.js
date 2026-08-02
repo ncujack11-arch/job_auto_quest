@@ -35,6 +35,7 @@ const FIELDS = {
   'basic.nativePlace': { labels: ['籍贯', '户籍所在地'], types: ['cascade'], pool: NATIVE_POOL },
   'basic.birthday': { labels: ['出生日期', '出生年月'], types: ['ym'], pool: BIRTH_POOL },
   'intent.targetCity': { labels: ['期望工作地点', '期望城市'], types: ['select'], pool: CITY_POOL },
+  'intent.expectedSalary': { labels: ['期望薪资', '期望月薪', '期望薪酬'], types: ['hybrid'], selectOpts: ['8K', '10K', '15K', '20K', '25K'] },
   'intent.complyAssignment': { labels: ['是否愿意服从公司分配', '服从分配'], types: ['checkbox'], pool: Y_N },
   'skills.englishLevel': { labels: ['英语等级', '英语水平'], types: ['select'], pool: ['CET-4', 'CET-6', '雅思', '托福'] },
   'skills.certificates': { labels: ['专业技能证书', '证书'], types: ['text'], pool: ['软件设计师', '网络工程师', 'CISP'] },
@@ -45,7 +46,7 @@ const FIELDS = {
 };
 
 // 每次固定取这些字段: 必含 6 个(fixed) + 随机池选 7-9 个
-const FIXED = ['basic.name', 'basic.phone', 'basic.email', 'basic.gender', 'education.school', 'openQuestions.intro'];
+const FIXED = ['basic.name', 'basic.phone', 'basic.email', 'basic.gender', 'education.school', 'openQuestions.intro', 'intent.expectedSalary'];
 const RANDOM_POOL = Object.keys(FIELDS).filter((k) => !FIXED.includes(k));
 
 function esc(s) { return String(s).replace(/"/g, '&quot;'); }
@@ -90,6 +91,11 @@ function renderField(key, def, fillValue, orderIdx) {
         <select data-test="basic.birthday.year"><option value="">年</option>${years}</select>
         <select data-test="basic.birthday.month"><option value="">月</option>${months}</select></div>`;
     }
+    case 'hybrid': {
+      const opts = (def.selectOpts || []).map((o) => `<option>${o}</option>`).join('');
+      return `<div class="row">${labelHtml}<select ${testAttr}><option value="">请选择</option>${opts}</select>
+        <input type="text" data-test="${key}.input" placeholder="或直接输入" style="flex:1"></div>`;
+    }
     default: return '';
   }
 }
@@ -103,7 +109,7 @@ function genForm() {
   const fillPlan = {};
   FIXED.slice(0, 4).forEach((k) => { fillPlan[k] = typeof FIELDS[k].pool === 'function' ? FIELDS[k].pool()[0] : pick(FIELDS[k].pool); });
   keys.forEach((k) => {
-    if (!fillPlan[k] && Math.random() < 0.5) {
+    if (!fillPlan[k] && FIELDS[k].pool && Math.random() < 0.5) {
       fillPlan[k] = typeof FIELDS[k].pool === 'function' ? FIELDS[k].pool()[0] : pick(FIELDS[k].pool);
     }
   });

@@ -119,6 +119,25 @@
     return { items, valueQueues, seenFields, unmatchedFields };
   }
 
+  // 降级兜底: 定位 select 附近的可见文本输入框(同容器/同行内 且 未匹配到其他字段)
+  function findFallbackTextInput(selEl) {
+    try {
+      let node = selEl;
+      for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
+        if (!node.querySelectorAll) continue;
+        const inputs = node.querySelectorAll('input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]):not([type="submit"]):not([type="button"]), textarea');
+        for (const inp of inputs) {
+          if (inp === selEl) continue;
+          if (!inp.disabled && !inp.readOnly) {
+            const rect = inp.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) return inp;
+          }
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
   // ---------- 执行填充计划 ----------
   // ctx: { report, snapshot(field), highlight(el,kind), showProgress(d,t), closeProgress(),
   //        setFillState(stage,detail), flushMemories(queue), sleep(ms) }
@@ -228,6 +247,17 @@
           highlight(field.el, 'af-highlight-ok');
           memPush(sel, fieldKey);
           continue;
+        }
+        // 5) 终极兜底: 降级为文本输入(常见于"选不上就手填"的混合组件/联动加载失败)
+        const fallbackInput = findFallbackTextInput(field.el);
+        if (fallbackInput && !fallbackInput.disabled && !fallbackInput.readOnly) {
+          const rFb = await AS.filler.fillField({ el: fallbackInput, type: fallbackInput.tagName === 'TEXTAREA' ? 'textarea' : 'text' }, origValue, opts);
+          if (rFb.ok && rFb.action === 'filled' && String(fallbackInput.value) === String(origValue)) {
+            report.filled++;
+            report.infos.push({ label, detail: `下拉未匹配, 已降级为文本输入(${origValue})` });
+            highlight(fallbackInput, 'af-highlight-ok');
+            continue;
+          }
         }
         report.unmatched++;
         report.unmatchedItems.push({ signature: fctx.name || fctx.id || label, label, reason: rFull.detail || '未匹配' });

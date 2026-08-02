@@ -395,6 +395,7 @@
     while (hasRemaining() && rounds < 3) {
       const addBtn = findAddRowButton();
       if (!addBtn) break;
+      if (rowLimitReached(addBtn)) break;
       LOG().info('content', 'dynamic row button found, clicking to add more');
       try {
         addBtn.click();
@@ -429,6 +430,44 @@
       AS.overlay.ensureFloatBall();
       if (settings.autoNext) autoNextLoop();
     }
+  }
+
+  // ---------- 动态行"最多 N 行"限制识别: 防止无脑点新增 ----------
+  function countDynamicRows(btn) {
+    try {
+      let node = btn;
+      for (let i = 0; i < 5 && node; i++, node = node.parentElement) {
+        if (!node || !node.children) continue;
+        for (const blk of node.children) {
+          if (!blk.querySelector || !blk.querySelector('input,select,textarea')) continue;
+          const cls = String(blk.className || '').trim();
+          const selector = cls ? '.' + cls.split(/\s+/).join('.') : null;
+          const same = selector ? Array.from(node.querySelectorAll(selector)) : [];
+          const cnt = same.filter((b) => b.querySelector && b.querySelector('input,select,textarea')).length;
+          if (cnt >= 2) return cnt;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return 0;
+  }
+  function rowLimitReached(addBtn) {
+    try {
+      if (addBtn.disabled || addBtn.getAttribute('aria-disabled') === 'true') return true;
+      const texts = [];
+      let node = addBtn;
+      for (let i = 0; i < 3 && node; i++, node = node.parentElement) texts.push((node.textContent || '').trim());
+      const joined = texts.join(' ');
+      const m = joined.match(/(?:最多|上限|至多|只能|最多可)\s*(?:添加|新增|填写)?\s*(\d+)\s*(?:条|个|段|份)/);
+      if (m && parseInt(m[1], 10) > 0) {
+        const rows = countDynamicRows(addBtn);
+        if (rows >= parseInt(m[1], 10)) {
+          LOG().info('content', 'dynamic row limit reached', { limit: m[1], rows });
+          return true;
+        }
+      }
+      if (/已满|已达上限|已到上限|不能再添加|已达最大/.test(joined)) return true;
+    } catch (e) { /* ignore */ }
+    return false;
   }
 
   // 是否存在多条可选择的经历

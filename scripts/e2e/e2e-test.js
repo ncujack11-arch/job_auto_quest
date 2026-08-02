@@ -144,7 +144,7 @@ const t = (name, ok, extra) => { if (ok) { pass++; console.log('  ✔', name); }
 
   // ===== 闭环3: 补充填写(空白字段随机 2-3 个)→ 再捕获入库 =====
   console.log('\n== 闭环3: 补充填写再捕获入库 ==');
-  const fillTargets = formState.blank.filter((b) => b.test !== 'basic.birthday.year' && b.test !== 'basic.birthday.month' && !String(b.test).includes('nativePlace')).slice(0, 3);
+  const fillTargets = formState.blank.filter((b) => b.test !== 'basic.birthday.year' && b.test !== 'basic.birthday.month' && !String(b.test).includes('nativePlace') && !String(b.test).endsWith('.input')).slice(0, 3);
   console.log('  补充填写:', fillTargets.map((f) => f.test + '/' + f.tag).join(', '));
   await page.evaluate((targets) => {
     const setV = (el, v) => {
@@ -191,6 +191,7 @@ const t = (name, ok, extra) => { if (ok) { pass++; console.log('  ✔', name); }
     if (test === 'basic.overseas') return '否';
     if (test === 'basic.currentLocation') return '成都';
     if (test === 'intent.targetCity') return '上海';
+    if (test === 'intent.expectedSalary') return '面议';
     if (test === 'skills.englishLevel') return 'CET-6';
     if (test === 'basic.politicalStatus') return '群众';
     if (test === 'basic.gender') return '女';
@@ -249,6 +250,11 @@ const t = (name, ok, extra) => { if (ok) { pass++; console.log('  ✔', name); }
   const pageAfter = await page.evaluate((tests) => {
     const out = {};
     tests.forEach((test) => {
+      // 混合控件: 下拉降级为兄弟输入框(如期望薪资 select + input)
+      if (test === 'intent.expectedSalary') {
+        const inp = document.querySelector('[data-test="intent.expectedSalary.input"]');
+        if (inp) { out[test] = inp.value || ''; return; }
+      }
       const el = document.querySelector('[data-test="' + test + '"]');
       if (!el) return;
       if (el.tagName === 'SELECT') out[test] = el.selectedIndex > 0 ? (el.options[el.selectedIndex].textContent || el.value) : '';
@@ -257,6 +263,15 @@ const t = (name, ok, extra) => { if (ok) { pass++; console.log('  ✔', name); }
     return out;
   }, usableBlank);
   console.log('  页面填充后:', JSON.stringify(pageAfter));
+  const hybridInfo = await page.evaluate(() => {
+    const sel = document.querySelector('[data-test="intent.expectedSalary"]');
+    const inp = document.querySelector('[data-test="intent.expectedSalary.input"]');
+    return { selSelected: sel ? sel.selectedIndex : -1, inputVal: inp ? inp.value : null };
+  });
+  // 混合控件降级断言: 下拉无法匹配时自动降级文本输入
+  if (usableBlank.includes('intent.expectedSalary')) {
+    t('混合控件降级: 下拉未匹配自动降级为文本输入', hybridInfo.selSelected === 0 && hybridInfo.inputVal === '面议', hybridInfo);
+  }
   // 分段比对: 级联/年月按拆段后的对应段期望
   const expectFor = (test) => {
     const v = String(fillSet[test]);
