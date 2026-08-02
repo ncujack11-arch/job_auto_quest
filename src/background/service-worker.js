@@ -68,14 +68,38 @@ function ensureMenus() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   ensureMenus();
   init();
+  // 更新/安装时自动备份全量数据, 防止意外丢失(保留最近 5 份快照)
+  autoBackup(details);
 });
 chrome.runtime.onStartup.addListener(() => {
   ensureMenus();
   init();
 });
+
+// ---------- 数据自保: 版本更新自动备份 ----------
+async function autoBackup(details) {
+  try {
+    const data = await AS.storage.exportAll();
+    const key = 'af_auto_backups';
+    const r = await chrome.storage.local.get(key);
+    const backups = (r && r[key]) || [];
+    backups.push({
+      at: Date.now(),
+      fromVersion: (details && details.previousVersion) || 'unknown',
+      toVersion: chrome.runtime.getManifest().version,
+      reason: (details && details.reason) || 'update',
+      data,
+    });
+    while (backups.length > 5) backups.shift();
+    await chrome.storage.local.set({ [key]: backups });
+    LOG.info('bg', 'auto backup saved', backups.length, 'snapshots');
+  } catch (e) {
+    LOG.warn('bg', 'auto backup failed', e);
+  }
+}
 
 // ---------- 工具 ----------
 async function getActiveTab() {

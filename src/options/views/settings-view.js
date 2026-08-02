@@ -525,6 +525,39 @@
       },
     }));
     card.appendChild(toolbar);
+
+    // ---------- 更新自动备份快照 ----------
+    const auto = UI().el('div', { style: 'margin-top:16px;border-top:1px solid #f1f5f9;padding-top:14px' });
+    auto.appendChild(UI().el('h4', { style: 'font-size:13.5px;margin-bottom:4px', text: '🛡 更新自动备份(扩展每次更新时自动留存全量快照)' }));
+    auto.appendChild(UI().el('p', { class: 'view-sub', text: '正常「重新加载扩展」不会删除本地数据; 此快照用于极端情况下的恢复兜底。保留最近 5 份。' }));
+    const snapList = UI().el('div', { style: 'margin-top:8px' });
+    const renderSnaps = async () => {
+      snapList.innerHTML = '';
+      const r = await chrome.storage.local.get('af_auto_backups');
+      const backups = (r && r.af_auto_backups) || [];
+      if (!backups.length) {
+        snapList.appendChild(UI().el('div', { style: 'font-size:12px;color:#9ca3af', text: '暂无自动备份(扩展更新时自动生成)' }));
+        return;
+      }
+      backups.slice().reverse().forEach((b) => {
+        const row = UI().el('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:6px;font-size:12.5px;max-width:560px' });
+        const label = `${new Date(b.at).toLocaleString('zh-CN')} · v${b.fromVersion} → v${b.toVersion}`;
+        row.appendChild(UI().el('span', { style: 'flex:1;color:#374151', text: label }));
+        row.appendChild(UI().el('button', {
+          class: 'btn sm', text: '恢复此快照', onclick: async () => {
+            if (!confirm('用该快照覆盖当前全部数据? 当前数据将丢失, 请确认。')) return;
+            await AS.storage.importAll(b.data, { overwrite: true });
+            await chrome.runtime.sendMessage({ type: 'AF_SYNC_REMINDERS' });
+            UI().toast('已恢复快照', 'success');
+            setTimeout(() => location.reload(), 800);
+          },
+        }));
+        snapList.appendChild(row);
+      });
+    };
+    renderSnaps();
+    auto.appendChild(snapList);
+    card.appendChild(auto);
   }
 
   function renderDebug(card) {
