@@ -329,9 +329,33 @@
       },
     }));
     toolbar.appendChild(UI().el('button', {
+      class: 'btn', text: '📤 复制到其他方案', onclick: () => openCopyToModal(),
+    }));
+    toolbar.appendChild(UI().el('button', {
       class: 'btn', text: '📋 复制视图', onclick: () => openCopyView(),
     }));
     return toolbar;
+  }
+
+  // 方案数据量描述(复制选择时展示, 便于判断该复制什么)
+  function profileDataSummary(p) {
+    const d = p.data || {};
+    try {
+      const basic = Object.keys(d.basic || {}).length;
+      const skills = Object.keys(d.skills || {}).length;
+      const intent = Object.keys(d.intent || {}).length;
+      const edu = (d.education || []).length;
+      const exp = (d.internship || []).length + (d.project || []).length;
+      const quiz = (d.openQuestions || []).length;
+      const parts = [];
+      if (basic) parts.push('基础' + basic + '项');
+      if (skills) parts.push('技能' + skills + '项');
+      if (intent) parts.push('意向' + intent + '项');
+      if (edu) parts.push('教育' + edu + '条');
+      if (exp) parts.push('经历' + exp + '条');
+      if (quiz) parts.push('题库' + quiz + '题');
+      return parts.join(' · ') || '空白方案';
+    } catch (e) { return ''; }
   }
 
   // ---------- 新建方案弹窗(支持从现有方案复制) ----------
@@ -347,13 +371,27 @@
     i1.appendChild(nameInput);
     box.appendChild(i1);
 
+    // 默认复制最近修改的方案, 避免误建空白方案重复填写
+    const recentId = [...profiles].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0] ? [...profiles].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0].id : '';
     const copySel = UI().el('select');
     copySel.appendChild(UI().el('option', { value: '', text: '— 空白方案(不复制)—' }));
-    profiles.forEach((p) => copySel.appendChild(UI().el('option', { value: p.id, text: p.name + (p.description ? ' — ' + p.description : '') })));
+    profiles.forEach((p) => {
+      const summary = profileDataSummary(p);
+      copySel.appendChild(UI().el('option', { value: p.id, text: p.name + (summary ? ' — ' + summary : '') + (p.description ? ' · ' + p.description : '') }));
+    });
+    copySel.value = recentId;
     const i2 = UI().el('div', { class: 'form-item' });
-    i2.appendChild(UI().el('label', { text: '复制自(可在此基础上修改, 避免重复填写)' }));
+    i2.appendChild(UI().el('label', { text: '复制自(默认最近方案, 可在此基础上修改避免重复填写)' }));
     i2.appendChild(copySel);
     box.appendChild(i2);
+    const srcInfo = UI().el('p', { class: 'view-sub', style: 'margin:4px 0 0 0;color:#64748b;font-size:12px' });
+    i2.appendChild(srcInfo);
+    const updateSrcInfo = () => {
+      const p = profiles.find((x) => x.id === copySel.value);
+      srcInfo.textContent = p ? `将复制: ${profileDataSummary(p)}。新建后可在该方案基础上修改。` : '将创建空白方案, 所有内容需手动填写。';
+    };
+    copySel.addEventListener('change', updateSrcInfo);
+    updateSrcInfo();
 
     box.appendChild(UI().el('div', { class: 'modal-foot' }, [
       UI().el('button', { class: 'btn', text: '取消', onclick: () => modal.remove() }),
@@ -390,6 +428,87 @@
     ]));
     document.body.appendChild(modal);
     nameInput.focus();
+  }
+
+  // ---------- 一键复制到其他方案(整体覆盖 / 合并) ----------
+  async function openCopyToModal() {
+    if (!currentProfile) { UI().toast('请先选择方案', 'error'); return; }
+    const profiles = await AS.storage.getProfiles();
+    const others = profiles.filter((p) => p.id !== currentProfile.id);
+    if (!others.length) { UI().toast('暂无其他方案可复制, 请先新建', 'error'); return; }
+    const modal = UI().el('div', { class: 'modal-mask' }, [UI().el('div', { class: 'modal', style: 'width:min(440px,92vw)' }, [])]);
+    const box = modal.querySelector('.modal');
+    box.appendChild(UI().el('h2', { text: `复制「${currentProfile.name}」到其他方案` }));
+    box.appendChild(UI().el('p', { class: 'view-sub', text: `来源方案内容: ${profileDataSummary(currentProfile)}` }));
+
+    const targetSel = UI().el('select');
+    others.forEach((p) => targetSel.appendChild(UI().el('option', { value: p.id, text: p.name + (p.description ? ' — ' + p.description : '') })));
+    const i1 = UI().el('div', { class: 'form-item' });
+    i1.appendChild(UI().el('label', { text: '目标方案 *' }));
+    i1.appendChild(targetSel);
+    box.appendChild(i1);
+
+    const modeSel = UI().el('select');
+    modeSel.appendChild(UI().el('option', { value: 'merge', text: '合并: 目标为空白的字段用来源填充(保留目标已有内容)' }));
+    modeSel.appendChild(UI().el('option', { value: 'overwrite', text: '整体覆盖: 目标方案完全替换为来源内容(谨慎)' }));
+    const i2 = UI().el('div', { class: 'form-item' });
+    i2.appendChild(UI().el('label', { text: '复制方式' }));
+    i2.appendChild(modeSel);
+    box.appendChild(i2);
+
+    box.appendChild(UI().el('div', { class: 'modal-foot' }, [
+      UI().el('button', { class: 'btn', text: '取消', onclick: () => modal.remove() }),
+      UI().el('button', {
+        class: 'btn primary', text: '开始复制', onclick: async () => {
+          const target = profiles.find((x) => x.id === targetSel.value);
+          if (!target) { UI().toast('请选择目标方案', 'error'); return; }
+          const src = currentProfile;
+          const mode = modeSel.value;
+          const srcData = JSON.parse(JSON.stringify(src.data || {}));
+          if (mode === 'overwrite') {
+            target.data = srcData;
+          } else {
+            // 合并: 字段级空值填充 + 经历条目补全
+            target.data = target.data || {};
+            AS.schema.CATEGORIES.forEach((cat) => {
+              const s = srcData[cat.id];
+              const t = target.data[cat.id];
+              if (!s) return;
+              if (cat.repeatable) {
+                const tArr = Array.isArray(t) ? t : [];
+                // 经历条目: 目标无同语义条目时追加来源条目(按首字段判断)
+                const firstKey = cat.fields && cat.fields[0] ? cat.fields[0].key : 'school';
+                const tKeys = new Set(tArr.map((e) => String(e[firstKey] || '').trim()));
+                const toAdd = (Array.isArray(s) ? s : []).filter((e) => !tKeys.has(String(e[firstKey] || '').trim()));
+                target.data[cat.id] = tArr.concat(toAdd);
+              } else {
+                const tObj = (t && typeof t === 'object') ? t : {};
+                Object.keys(s).forEach((k) => {
+                  const sv = s[k];
+                  const tv = tObj[k];
+                  if (sv !== undefined && sv !== null && sv !== '' && (tv === undefined || tv === null || tv === '')) tObj[k] = sv;
+                });
+                target.data[cat.id] = tObj;
+              }
+            });
+          }
+          // 结构完整性
+          AS.schema.CATEGORIES.forEach((cat) => {
+            if (cat.repeatable && !Array.isArray(target.data[cat.id])) target.data[cat.id] = [];
+            if (!cat.repeatable && (!target.data[cat.id] || typeof target.data[cat.id] !== 'object')) target.data[cat.id] = {};
+          });
+          if (!Array.isArray(target.data.custom)) target.data.custom = [];
+          target.updatedAt = Date.now();
+          target.description = target.description ? target.description : '复制自 ' + src.name;
+          await AS.storage.saveProfile(target);
+          modal.remove();
+          UI().toast(`已复制到「${target.name}」(${mode === 'overwrite' ? '整体覆盖' : '合并'})`, 'success');
+          if (currentProfile.id === target.id) { dirty = true; await render(containerRef); }
+        },
+      }),
+    ]));
+    document.body.appendChild(modal);
+    targetSel.focus();
   }
 
   // ---------- 复制视图: 只读展示 + 一键复制 ----------

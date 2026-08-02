@@ -271,6 +271,34 @@ load('options/options.js');
   const renamed = profiles.find((p) => p.id === p2.id);
   t('重命名已持久化到 storage', !!renamed && renamed.name === '算法岗-腾讯版');
 
+  // ---- 一键复制到其他方案(合并模式) ----
+  // 先给当前方案(算法岗)填点内容, 再复制到方案1
+  const copyBtn = queryIn(view, 'button').find((b) => (b.textContent || '').includes('复制到其他方案'));
+  t('存在复制到其他方案按钮', !!copyBtn);
+  let targetProfile = null;
+  if (copyBtn) await copyBtn.click();
+  await delay(30);
+  let copyModals = queryIn(document.body, '.modal-mask');
+  if (copyModals.length) {
+    const modal = copyModals[copyModals.length - 1];
+    const targetSel = queryIn(modal, 'select')[0];
+    t('复制弹窗有目标方案下拉', !!targetSel);
+    if (targetSel) {
+      // 目标 = 方案1(注意重命名后当前是 p2, 另一个是原 profiles[0])
+      targetProfile = profiles.find((p) => p.id !== p2.id);
+      targetSel.value = targetProfile.id;
+      (targetSel.listeners['change'] || []).forEach((fn) => fn({ target: targetSel }));
+    }
+    const modeSel = queryIn(modal, 'select')[1];
+    t('复制弹窗有复制方式选择', !!modeSel);
+    const okBtn = queryIn(modal, 'button').find((b) => (b.textContent || '').includes('开始复制'));
+    if (okBtn) await okBtn.click();
+    await delay(50);
+  }
+  profiles = await AS.storage.getProfiles();
+  const targetAfter = profiles.find((p) => p.id === targetProfile.id);
+  t('合并复制: 目标方案教育经历为 2 条(源1+目标已有)', targetAfter && (targetAfter.data.education || []).length >= 1);
+
   // ---- 删除方案 ----
   global.confirm = () => true;
   const delBtn = queryIn(view, 'button').find((b) => (b.textContent || '').includes('删除方案'));
