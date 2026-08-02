@@ -1,0 +1,50 @@
+/**
+ * logger.js — 分级日志输出
+ * 全局命名空间: AS (AutoFill System)
+ * 级别: debug < info < warn < error,可通过设置中的 logLevel 调整
+ */
+(function () {
+  'use strict';
+  const AS = (window.AS = window.AS || {});
+  if (AS.logger) return;
+
+  const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
+  let level = LEVELS.info;
+
+  function now() {
+    return new Date().toISOString().slice(11, 23);
+  }
+
+  function setLevel(lv) {
+    level = LEVELS[lv] !== undefined ? LEVELS[lv] : LEVELS.info;
+  }
+  function getLevelName() {
+    return Object.keys(LEVELS).find((k) => LEVELS[k] === level) || 'info';
+  }
+
+  function out(lv, args, tag) {
+    if (LEVELS[lv] < level) return;
+    const prefix = `[AF:${tag || '?'}] ${now()}`;
+    const fn = lv === 'debug' ? console.debug : lv === 'warn' ? console.warn : lv === 'error' ? console.error : console.info;
+    fn(prefix, ...args);
+  }
+
+  AS.logger = {
+    LEVELS,
+    setLevel,
+    getLevelName,
+    debug: (tag, ...a) => out('debug', a, tag),
+    info: (tag, ...a) => out('info', a, tag),
+    warn: (tag, ...a) => out('warn', a, tag),
+    error: (tag, ...a) => out('error', a, tag),
+  };
+
+  // 读取持久化的日志级别(后台与选项页有 chrome.storage)
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get('af_settings').then((r) => {
+        if (r.af_settings && r.af_settings.logLevel) setLevel(r.af_settings.logLevel);
+      }).catch(() => {});
+    }
+  } catch (e) { /* ignore */ }
+})();
