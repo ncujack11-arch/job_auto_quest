@@ -343,11 +343,17 @@
         setTimeout(() => AS.overlay.toast('⚠ 检测到滑块/验证码组件, 请手动完成验证'), 1200);
       }
       if (reuseActive) AS.storage.clearReusePayload();
+      // 结果整合: 不弹多余结果面板, 缓存供「查看填充结果」入口; 用 toast 一键直达提示
+      window.__af_last_result = { report, snapshots, unmatchedEls, at: Date.now() };
       if (!withPanel) return;
-      if (report.filled > 0) {
-        AS.overlay.showSummary(report, snapshots && snapshots.length ? () => undoAll(snapshots) : null, unmatchedEls);
-      } else if (report.unmatched > 0 || report.errors > 0) {
-        AS.overlay.showSummary(report, null, unmatchedEls);
+      if (report.filled > 0 || report.skipped > 0 || report.unmatched > 0 || report.errors > 0) {
+        const parts = [`成功 ${report.filled}`, `跳过 ${report.skipped}`];
+        if (report.unmatched) parts.push(`未匹配 ${report.unmatched}`);
+        if (report.notEffective) parts.push(`未生效 ${report.notEffective}`);
+        const detail = unmatchedEls && unmatchedEls.length ? `, ${unmatchedEls.length} 个字段未写入(点悬浮球 → 查看填充结果可定位)` : ', 点悬浮球 → 查看填充结果可回滚';
+        safeToast(`✅ 填充完成: ${parts.join(' · ')}${detail}`, 4500);
+      } else {
+        safeToast('填充完成: 无匹配字段', 2500);
       }
     };
 
@@ -866,6 +872,16 @@
       case 'AF_FILL_SUMMARY':
         if (isCurrent() && window.top === window && msg.summary) {
           AS.overlay.showSummary(msg.summary);
+        }
+        break;
+      case 'AF_SHOW_LAST_RESULT':
+        if (isCurrent() && window.top === window) {
+          const last = window.__af_last_result;
+          if (last && (Date.now() - last.at) < 10 * 60 * 1000) {
+            AS.overlay.showSummary(last.report, last.snapshots && last.snapshots.length ? () => undoAll(last.snapshots) : null, last.unmatchedEls);
+          } else {
+            AS.overlay.toast('暂无近期填充结果, 请先执行一次填充');
+          }
         }
         break;
       case 'AF_DIAGNOSTIC':

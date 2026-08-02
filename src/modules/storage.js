@@ -31,7 +31,7 @@
     typingMode: false,           // 逐字模拟输入
     typingMin: 30,               // 逐字输入间隔范围(ms)
     typingMax: 120,
-    previewMode: true,           // 填充前预览确认
+    previewMode: false,           // 填充前预览确认(默认关: 一键直达, 不弹多余弹窗)
     siteFilter: { mode: 'all', blacklist: [], whitelist: [] },  // 域名黑白名单
     autoNext: false,             // 多页表单自动下一步续填(默认关, 绝不自动提交)
     autoAgreeProtocol: true,     // 自动勾选用户协议/隐私政策复选框

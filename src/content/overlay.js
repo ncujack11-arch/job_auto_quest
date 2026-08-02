@@ -625,6 +625,7 @@
         body.appendChild(row);
       };
       addRow('⚡', '一键填充当前表单', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_TRIGGER_FILL' }); });
+      addRow('📊', '查看上次填充结果', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_SHOW_LAST_RESULT' }); });
       const countRow = h('div', { class: 'af-fp-row' });
       countRow.appendChild(h('span', { class: 'fp-icon', text: '🧩' }));
       countRow.appendChild(h('span', { class: 'fp-text', text: '分段填充:' }));

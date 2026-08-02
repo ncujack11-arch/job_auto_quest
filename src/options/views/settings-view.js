@@ -91,17 +91,17 @@
     form.appendChild(conflict);
 
     const previewItem = UI().el('div', { class: 'form-item' });
-    previewItem.appendChild(UI().el('label', { text: '填充前预览确认' }));
+    previewItem.appendChild(UI().el('label', { text: '填充前预览确认(默认关, 一键直达)' }));
     const pWrap = UI().el('div', { style: 'display:flex;gap:8px;align-items:center' });
     const pCheck = UI().el('input', {
-      type: 'checkbox', checked: settings.previewMode !== false,
+      type: 'checkbox', checked: settings.previewMode === true,
       onchange: async (e) => {
         settings.previewMode = e.target.checked;
         await AS.storage.saveSettings(settings);
       },
     });
     pWrap.appendChild(pCheck);
-    pWrap.appendChild(UI().el('span', { style: 'font-size:12px;color:#6b7280', text: '填充前展示每个字段将填入的值, 可勾选跳过, 填充后可一键撤销' }));
+    pWrap.appendChild(UI().el('span', { style: 'font-size:12px;color:#6b7280', text: '默认关闭: 点填充直接写入, 完成后 toast 汇总; 开启后在填充前展示每个字段将填入的值(可勾选跳过), 填充结果可在悬浮球菜单查看' }));
     previewItem.appendChild(pWrap);
     form.appendChild(previewItem);
 
