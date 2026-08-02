@@ -263,12 +263,17 @@
         unmatchedEls.push({ el: field.el, label });
         AS.overlay.highlight(field.el, 'af-highlight');
       } else {
-        // 未匹配: 若为多段值(如 "江西 上饶市 余干县")尝试用第一段填入当前下拉, 剩余段留给下一个同键下拉(级联)
+        // 未匹配: 多段值(如 "江西 上饶市 余干县" / 日期"2027-07"年/月分列)尝试用第一段填入当前下拉, 剩余段留给下一个同键下拉(级联)
         if (field.type === 'select' && cascadeState === null) {
-          const parts = String(origValue).split(/[\s、／/]+/).filter(Boolean);
+          const parts = AS.dates.splitCascadeValue(origValue);
           if (parts.length > 1) {
             const first = parts.shift();
-            const r2 = await AS.filler.fillField(field, first, opts);
+            let r2 = await AS.filler.fillField(field, first, opts);
+            // 联动加载重试: 下级选项可能未加载完, 等待后重试一次
+            if (!r2.ok && !cascadeState) {
+              await sleep(500);
+              r2 = await AS.filler.fillField(field, first, opts);
+            }
             if (r2.ok && r2.action === 'filled') {
               cascadeState = { key: fieldKey, parts };
               report.filled++;
@@ -278,6 +283,19 @@
               }
               continue;
             }
+          }
+        }
+        // 普通 select 失败: 等待联动选项加载后重试一次(部分系统选项异步渲染)
+        if (field.type === 'select' && cascadeState === null) {
+          await sleep(400);
+          const retry = await AS.filler.fillField(field, value, opts);
+          if (retry.ok && retry.action === 'filled') {
+            report.filled++;
+            AS.overlay.highlight(field.el, 'af-highlight-ok');
+            if (sel && fieldKey && !fieldKey.startsWith('reuse.') && fieldKey !== 'openQuestions') {
+              memoriesQueue.push({ sel, fieldKey });
+            }
+            continue;
           }
         }
         report.unmatched++;
@@ -523,6 +541,19 @@
       LOG().info('content', 'fill done in ' + frameLabel(), { filled: report.filled, unmatched: report.unmatched, took: (Date.now() - t0) + 'ms' });
       setFillState('done', `成功 ${report.filled} · 跳过 ${report.skipped} · 未匹配 ${report.unmatched}${report.notEffective ? ' · 未生效 ' + report.notEffective : ''}`);
       reportProgress('done', { filled: report.filled, skipped: report.skipped, unmatched: report.unmatched, errors: report.errors, notEffective: report.notEffective || 0 });
+      // 填充完成后自动提取页面投递信息(供 Popup 一键保存投递)
+      if (window.top === window && (report.filled > 0 || report.skipped > 0)) {
+        try {
+          const info = grabPageInfo();
+          chrome.runtime.sendMessage({
+            type: 'AF_GRAB_READY',
+            info: {
+              company: info.company, position: info.position, city: info.city, salary: info.salary,
+              url: info.url, channel: info.channel, grabbedAt: Date.now(),
+            },
+          }).catch(() => {});
+        } catch (e) { /* ignore */ }
+      }
       try { await chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }); } catch (e) { /* noop */ }
       if (report.filled > 0 || report.skipped > 0) {
         setTimeout(() => AS.detect.arm(), 800);
@@ -596,6 +627,19 @@
       extra.items.forEach((it) => seenFields.add(it.field.el));
       if (!extra.items.length) break;
       const er = await executePlan(extra, null, opts, settings, report);
+      // 行内漏填重试: 嵌套下拉/日期控件偶发未写入时, 等待联动加载后重试
+      for (const it of extra.items) {
+        try {
+          if (it.field.type === 'select' && !it.field.el.value) {
+            await sleep(500);
+            const r3 = await AS.filler.fillField(it.field, it.value, opts);
+            if (r3.ok && r3.action === 'filled') {
+              report.filled++;
+              AS.overlay.highlight(it.field.el, 'af-highlight-ok');
+            }
+          }
+        } catch (e) { /* ignore */ }
+      }
       snapshots = snapshots.concat(er.snapshots);
       unmatchedEls = unmatchedEls.concat(er.unmatchedEls);
       rounds++;

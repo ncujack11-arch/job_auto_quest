@@ -57,6 +57,13 @@ function t(name, cond) {
   t('解析 年月', d3 && d3.y === 2024 && d3.m === 9 && d3.d === 0);
   t('格式化为中文', AS.dates.formatDate({ y: 2024, m: 7, d: 1 }, 'yyyy年mm月dd日') === '2024年07月01日');
   t('格式化为斜杠', AS.dates.formatDate({ y: 2024, m: 7, d: 1 }, 'yyyy/mm/dd') === '2024/07/01');
+  // 级联拆段(填入优化)
+  const sp1 = AS.dates.splitCascadeValue('江西 上饶市 余干县');
+  t('级联拆段: 省市县三级', sp1.length === 3 && sp1[0] === '江西' && sp1[1] === '上饶市');
+  const sp2 = AS.dates.splitCascadeValue('2027-07');
+  t('级联拆段: 日期年/月分列', sp2.length === 2 && sp2[0] === '2027' && sp2[1] === '7');
+  const sp3 = AS.dates.splitCascadeValue('2020.09-2024.06');
+  t('级联拆段: 区间日期不误拆', sp3.length === 1);
 
   console.log('== matcher ==');
   const mkCtx = (o) => Object.assign({

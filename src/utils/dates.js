@@ -83,5 +83,22 @@
     return /(日期|年月|生日|出生|时间|date|birth|time|year|month|毕业|入学)/i.test(ph);
   }
 
-  AS.dates = { parseDateStr, formatDate, detectTargetFormat, isDateish };
+  // 级联/分列值拆段: 支持 省市县多级、日期 年/月 分列、斜杠/空格/顿号分隔
+  // "江西 上饶市 余干县" → ['江西','上饶市','余干县']
+  // "2027-07" → ['2027','7'] (年/月分列下拉); 区间 "2020.09-2024.06" 不误拆
+  function splitCascadeValue(value) {
+    let parts = String(value || '').split(/[\s、／/]+/).filter(Boolean);
+    if (parts.length === 1) {
+      const s = parts[0];
+      // 区间日期(如 2020.09-2024.06 / 2020-2024)不误拆; 单日期(2027-07)可拆为 年/月
+      const isRange = /(\d{4})\S*?[-—~至到]\S*?(\d{4})/.test(s);
+      if (!isRange) {
+        const d = parseDateStr(s);
+        if (d && d.y && d.m) parts = [String(d.y), String(d.m)];
+      }
+    }
+    return parts;
+  }
+
+  AS.dates = { parseDateStr, formatDate, detectTargetFormat, isDateish, splitCascadeValue };
 })();

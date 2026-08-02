@@ -25,7 +25,7 @@
   };
 
   const DEFAULT_SETTINGS = {
-    version: '1.11.0',
+    version: '1.12.0',
     activeProfileId: null,
     conflictMode: 'skip',        // 'skip' | 'overwrite'
     typingMode: false,           // 逐字模拟输入

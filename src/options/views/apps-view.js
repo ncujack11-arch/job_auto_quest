@@ -250,17 +250,38 @@
   }
 
   function statusSelect(app, onChange) {
+    const wrap = UI().el('div', { style: 'display:flex;flex-direction:column;gap:4px;min-width:150px' });
+    const row1 = UI().el('div', { style: 'display:flex;gap:4px' });
+    // 快捷状态按钮: 点一下即切换并记录时间
+    const QUICK = [['笔试', '笔试中'], ['一面', '一面'], ['二面', '二面'], ['OC', 'OC'], ['挂', '已回绝']];
+    QUICK.forEach(([label, status]) => {
+      const chip = UI().el('button', {
+        class: 'status-chip' + (app.status === status ? ' active' : ''),
+        style: 'font-size:10.5px;padding:1px 7px;border:1px solid #e2e8f0;border-radius:9px;background:#fff;cursor:pointer;color:#475569',
+        text: label,
+        onclick: async () => {
+          await AS.apps.setStatus(app.id, status);
+          UI().toast(`${app.company} → ${status}`, 'success');
+          await reload();
+          renderAll();
+        },
+      });
+      row1.appendChild(chip);
+    });
+    wrap.appendChild(row1);
     const sel = UI().el('select', {
-      class: 'status', style: 'padding:3px 6px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px',
+      style: 'padding:3px 6px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px',
       onchange: async (e) => {
         await AS.apps.setStatus(app.id, e.target.value);
         UI().toast(`${app.company} → ${e.target.value}`, 'success');
-        await reload(); renderAll();
+        await reload();
+        renderAll();
       },
     });
     statusFlow.forEach((s) => sel.appendChild(UI().el('option', { value: s, text: s })));
     sel.value = app.status;
-    return sel;
+    wrap.appendChild(sel);
+    return wrap;
   }
 
   function renderTable() {

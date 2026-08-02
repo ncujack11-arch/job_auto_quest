@@ -31,6 +31,8 @@
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
   // 核心: 绕过框架的 value 写入(兼容 React 受控组件)
+  // 补全完整原生事件流: focus → keydown → input → keyup → change → blur
+  // 确保 React/Vue 校验与数据绑定 100% 触发
   function setNativeValue(el, value) {
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
@@ -41,9 +43,16 @@
       }
     } catch (e) { /* ignore */ }
     setter.call(el, value);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('blur', { bubbles: true }));
+    // 完整事件序列(模拟真人输入)
+    try {
+      if (typeof el.focus === 'function') el.focus();
+      el.dispatchEvent(new Event('focus', { bubbles: true }));
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: String(value), inputType: 'insertText' }));
+      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('blur', { bubbles: true }));
+    } catch (e) { /* 个别环境事件构造失败时降级 */ }
   }
 
   // 逐字模拟输入
@@ -88,7 +97,12 @@
     }
     if (!hit) return false;
     el.value = opts[hit.index].value;
+    // 完整事件序列
+    try { if (typeof el.focus === 'function') el.focus(); } catch (e) { /* ignore */ }
+    el.dispatchEvent(new Event('focus', { bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
     el.dispatchEvent(new Event('blur', { bubbles: true }));
     return true;

@@ -61,6 +61,25 @@
     } catch (e) {
       $('site').textContent = '当前页面: ' + (tab.url || '');
     }
+    await loadGrabCard();
+  }
+
+  // 上次填充的页面投递信息 → 一键保存
+  async function loadGrabCard() {
+    try {
+      const r = await chrome.storage.local.get('af_last_grab');
+      const g = r.af_last_grab;
+      if (!g || !g.grabbedAt || Date.now() - g.grabbedAt > 24 * 3600 * 1000) return;
+      const el = $('grabCard');
+      el.classList.remove('hidden');
+      $('grabInfo').innerHTML = '';
+      const parts = [];
+      if (g.company) parts.push(`<b>${g.company}</b>`);
+      if (g.position) parts.push(g.position);
+      if (g.city) parts.push(g.city);
+      if (g.salary) parts.push(g.salary);
+      $('grabInfo').innerHTML = '上次填充页面: ' + (parts.join(' · ') || '未知岗位');
+    } catch (e) { /* ignore */ }
   }
 
   async function scanCount() {
@@ -254,6 +273,15 @@
         $('previewConfirmBtn').classList.add('hidden');
       } catch (e) {
         showStatus('error', '确认失败: ' + (e.message || e));
+      }
+    });
+    $('saveGrabBtn').addEventListener('click', async () => {
+      if (!currentTab) return;
+      try {
+        await chrome.runtime.sendMessage({ type: 'AF_RECORD_NOW' });
+        window.close();
+      } catch (e) {
+        showStatus('error', '保存失败: ' + (e.message || e));
       }
     });
     $('manualRecord').addEventListener('click', async () => {

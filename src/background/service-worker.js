@@ -332,6 +332,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       chrome.runtime.sendMessage(msg).catch(() => {});
       break;
 
+    case 'AF_GRAB_READY':
+      // 填充完成后页面投递信息缓存(Popup 一键保存)
+      if (msg && msg.info) {
+        chrome.storage.local.set({ af_last_grab: msg.info }).catch(() => {});
+      }
+      break;
+
     case 'AF_LEARN_COLLECT_RESULT':
       if (sender.tab) {
         learnTabId = sender.tab.id;
