@@ -81,7 +81,10 @@
         showStatus('error', '信息库为空, 请先在配置页录入个人信息');
         return;
       }
-      await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_FILL' });
+      // 分段填充: 收集勾选模块
+      const all = $('allSections').checked;
+      const sections = all ? [] : Array.from(document.querySelectorAll('#sectionsGrid input:checked')).map((c) => c.value);
+      await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_FILL', sections });
       showStatus('ok', '已触发填充, 结果将显示在页面右下角');
     } catch (e) {
       showStatus('error', '填充失败: ' + (e.message || e));
@@ -99,6 +102,9 @@
 
   function bindEvents() {
     $('fillBtn').addEventListener('click', fill);
+    $('allSections').addEventListener('change', (e) => {
+      document.querySelectorAll('#sectionsGrid input').forEach((c) => { c.checked = e.target.checked; });
+    });
     $('profileSelect').addEventListener('change', async (e) => {
       await AS.storage.saveSettings({ activeProfileId: e.target.value });
     });

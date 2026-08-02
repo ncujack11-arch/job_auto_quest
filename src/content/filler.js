@@ -224,6 +224,10 @@
         }
         case 'select': {
           const ok = fillSelect(el, value);
+          if (ok) {
+            // 级联选择器联动: 省份/城市等选择后等待动态加载下级选项
+            await sleep(220);
+          }
           return ok ? { ok: true, action: 'filled' } : { ok: false, action: 'unmatched', detail: '下拉无匹配选项' };
         }
         case 'radio': {

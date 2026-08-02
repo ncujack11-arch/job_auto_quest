@@ -29,6 +29,23 @@
     <button id="fillBtn" class="primary-btn">⚡ 一键填充当前表单</button>
     <div id="fillStatus" class="fill-status hidden"></div>
 
+    <section class="sections-box" id="sectionsBox">
+      <div class="sections-head">
+        <span>分段填充(仅填勾选模块)</span>
+        <label class="mini-check"><input type="checkbox" id="allSections" checked> 全部</label>
+      </div>
+      <div class="sections-grid" id="sectionsGrid">
+        <label class="mini-check"><input type="checkbox" value="basic" checked> 基本信息</label>
+        <label class="mini-check"><input type="checkbox" value="education" checked> 教育经历</label>
+        <label class="mini-check"><input type="checkbox" value="internship" checked> 实习经历</label>
+        <label class="mini-check"><input type="checkbox" value="project" checked> 项目经历</label>
+        <label class="mini-check"><input type="checkbox" value="skills" checked> 技能证书</label>
+        <label class="mini-check"><input type="checkbox" value="intent" checked> 求职意向</label>
+        <label class="mini-check"><input type="checkbox" value="openQuestions" checked> 开放题</label>
+        <label class="mini-check"><input type="checkbox" value="custom" checked> 自定义</label>
+      </div>
+    </section>
+
     <section class="quick-row">
       <button id="openOptions" class="ghost-btn">⚙ 完整配置</button>
       <button id="manualRecord" class="ghost-btn">📋 记录投递</button>

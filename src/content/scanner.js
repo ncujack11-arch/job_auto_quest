@@ -37,11 +37,26 @@
     return Array.from(sel.options || []).map((o) => ({ text: o.textContent || '', value: o.value, selected: o.selected }));
   }
 
+  // 收集文档内全部元素(穿透 open Shadow DOM, 适配 Web Components 表单组件)
+  function collectAllElements(root) {
+    const elements = [];
+    const walk = (r) => {
+      if (!r || !r.querySelectorAll) return;
+      const list = r.querySelectorAll('*');
+      for (const el of list) {
+        elements.push(el);
+        if (el.shadowRoot && el.shadowRoot.mode === 'open') walk(el.shadowRoot);
+      }
+    };
+    walk(root || document);
+    return elements;
+  }
+
   // 单选组: 按 name 分组, 每组返回一个 field
-  function groupRadios() {
+  function groupRadios(elements) {
     const groups = new Map();
-    const radios = Array.from(document.querySelectorAll('input[type="radio"]'));
-    radios.forEach((r) => {
+    elements.forEach((r) => {
+      if (r.tagName !== 'INPUT' || (r.type || '').toLowerCase() !== 'radio') return;
       if (!isVisibleEl(r) || !inFormLikeContext(r)) return;
       const key = r.name || r.id || ('r_' + r.value);
       if (!groups.has(key)) groups.set(key, { type: 'radio', elements: [] });
@@ -53,6 +68,7 @@
   function scan() {
     const fields = [];
     const seen = new Set();
+    const elements = collectAllElements(document);
 
     const handle = (el, type, extra) => {
       if (!el || seen.has(el)) return;
@@ -61,7 +77,8 @@
     };
 
     // 文本类输入
-    document.querySelectorAll('input').forEach((el) => {
+    elements.forEach((el) => {
+      if (el.tagName !== 'INPUT') return;
       const t = (el.type || 'text').toLowerCase();
       if (SKIP_TYPES.includes(t)) return;
       if (!isVisibleEl(el) || el.disabled || el.readOnly) return;
@@ -78,20 +95,22 @@
       }
     });
 
-    document.querySelectorAll('textarea').forEach((el) => {
+    elements.forEach((el) => {
+      if (el.tagName !== 'TEXTAREA') return;
       if (!isVisibleEl(el) || el.disabled || el.readOnly) return;
       if (!inFormLikeContext(el)) return;
       handle(el, 'textarea');
     });
 
-    document.querySelectorAll('select').forEach((el) => {
+    elements.forEach((el) => {
+      if (el.tagName !== 'SELECT') return;
       if (!isVisibleEl(el) || el.disabled) return;
       if (!inFormLikeContext(el)) return;
       handle(el, 'select', { options: collectOptions(el) });
     });
 
     // 富文本 / 自定义下拉(避免与普通输入重复)
-    document.querySelectorAll('[contenteditable="true"],[contenteditable=""],[role="combobox"],[role="textbox"]').forEach((el) => {
+    elements.forEach((el) => {
       if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return;
       if (!isVisibleEl(el) || el.disabled) return;
       if (!inFormLikeContext(el)) return;
@@ -107,7 +126,7 @@
     });
 
     // 单选组(合并为一个字段)
-    groupRadios().forEach((g) => {
+    groupRadios(elements).forEach((g) => {
       const first = g.elements[0];
       if (!first) return;
       handle(first, 'radio', { group: g.elements });
@@ -116,5 +135,5 @@
     return fields;
   }
 
-  AS.scanner = { scan };
+  AS.scanner = { scan, collectAllElements };
 })();

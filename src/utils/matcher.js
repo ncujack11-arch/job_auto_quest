@@ -177,9 +177,20 @@
       if (!def.kw || !def.kw.length) continue;
       let score = 0;
       const hits = [];
-      // labelText 优先(全标签命中 = 高置信)
-      if (ctx.labelText && def.kw.some((k) => fz.normalize(ctx.labelText).includes(fz.normalize(k)))) {
-        score += 8; hits.push('label');
+      // labelText 优先: 命中关键词越长越具体, 权重越高
+      if (ctx.labelText) {
+        const nl = fz.normalize(ctx.labelText);
+        let bestKwLen = 0;
+        for (const k of def.kw) {
+          const nk = fz.normalize(k);
+          if (nk && nl.includes(nk)) bestKwLen = Math.max(bestKwLen, nk.length);
+        }
+        if (bestKwLen) {
+          score += Math.min(10, 3 + bestKwLen * 1.2);
+          hits.push('label');
+          // label 与字段名完全一致时再加权, 解决同分冲突
+          if (nl === fz.normalize(def.label)) score += 4;
+        }
       }
       if (ctx.placeholder && fz.containsAny(ctx.placeholder, def.kw)) { score += 4; hits.push('placeholder'); }
       if (ctx.ariaLabel && fz.containsAny(ctx.ariaLabel, def.kw)) { score += 4; hits.push('aria'); }
@@ -264,5 +275,18 @@
     return false;
   }
 
-  AS.matcher = { buildContext, signatureOf, matchField, resolveValues, resolveOpenQuestion, isOpenQuestionField, MATCH_THRESHOLD };
+  // 生成元素选择器(供选择器记忆使用)
+  function genSelector(el) {
+    try {
+      if (!el) return '';
+      if (el.id) return '#' + CSS.escape(String(el.id));
+      const tag = el.tagName ? el.tagName.toLowerCase() : '';
+      if (el.name && /^(input|textarea|select|button)$/.test(tag)) {
+        return tag + '[name="' + String(el.name).replace(/"/g, '\\"') + '"]';
+      }
+      return '';
+    } catch (e) { return ''; }
+  }
+
+  AS.matcher = { buildContext, signatureOf, matchField, resolveValues, resolveOpenQuestion, isOpenQuestionField, genSelector, MATCH_THRESHOLD };
 })();

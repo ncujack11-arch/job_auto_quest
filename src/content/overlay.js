@@ -30,6 +30,13 @@
 .af-item:last-child { border-bottom: 0; }
 .af-item .t { color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .af-item .d { color: #9ca3af; flex-shrink: 0; }
+.af-preview-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #f3f4f6; font-size: 12px; }
+.af-preview-item:last-child { border-bottom: 0; }
+.af-preview-item .pv-label { flex: 0 0 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #6b7280; }
+.af-preview-item .pv-value { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #111827; font-weight: 500; }
+.af-highlight { outline: 2px solid #dc2626 !important; outline-offset: 1px !important; border-color: #dc2626 !important; }
+.af-highlight-ok { outline: 2px solid #16a34a !important; outline-offset: 1px !important; }
+.af-highlight-skip { outline: 1px dashed #d97706 !important; outline-offset: 1px !important; }
 .af-actions { display: flex; gap: 8px; margin-top: 12px; }
 .af-btn { flex: 1; padding: 8px 10px; border: 0; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; }
 .af-btn.primary { background: #2563eb; color: #fff; }
@@ -90,9 +97,42 @@
     ]);
   }
 
+  // ---------- 填充预览 ----------
+  function showPreview(items, onConfirm, onCancel) {
+    if (!items || !items.length) { onConfirm && onConfirm(new Set()); return; }
+    const selected = new Set(items.map((_, i) => i));
+    const rows = items.map((it, i) => {
+      const cb = h('input', { type: 'checkbox', checked: '', dataIdx: String(i) });
+      cb.addEventListener('change', (e) => {
+        if (e.target.checked) selected.add(i); else selected.delete(i);
+      });
+      return h('div', { class: 'af-preview-item' }, [
+        cb,
+        h('span', { class: 'pv-label', text: (it.label || '未知字段').slice(0, 24) }),
+        h('span', { class: 'pv-value', text: String(it.value).slice(0, 40) }),
+      ]);
+    });
+    const panel = showPanel(h('div', {}, [
+      head('填充预览', h('button', { class: 'af-close', text: '×', onclick: () => { closePanel(); onCancel && onCancel(); } })),
+      h('div', { class: 'af-body' }, [
+        h('p', { style: 'font-size:12px;color:#6b7280;margin-bottom:8px', text: `共 ${items.length} 个字段将填入以下内容, 取消勾选可跳过个别字段。` }),
+        h('div', { class: 'af-list', style: 'max-height:300px' }, rows),
+        h('div', { class: 'af-actions' }, [
+          h('button', { class: 'af-btn ghost', text: '取消', onclick: () => { closePanel(); onCancel && onCancel(); } }),
+          h('button', { class: 'af-btn primary', text: `确认填充 (${items.length})`, onclick: () => { closePanel(); onConfirm && onConfirm(selected); } }),
+        ]),
+      ]),
+    ]));
+    return panel;
+  }
+
   // ---------- 填充结果 ----------
-  function showSummary(summary) {
-    if (!summary || (summary.total === 0)) return;
+  let lastSummaryAt = 0;
+  function showSummary(summary, undoFn) {
+    if (!summary || (summary.total === 0 && !summary.blocked)) return;
+    const now = Date.now();
+    if (now - lastSummaryAt < 4000) return; // 内容脚本本地显示与后台广播去重
+    lastSummaryAt = now;
     const filled = summary.filled || 0, skipped = summary.skipped || 0, bad = (summary.unmatched || 0) + (summary.errors || 0);
     const unmatched = summary.unmatchedItems || [];
     const list = unmatched.slice(0, 12).map((u) => h('div', { class: 'af-item' }, [
@@ -118,6 +158,12 @@
           ]),
         ] : null,
         h('div', { class: 'af-actions' }, [
+          undoFn ? h('button', { class: 'af-btn ghost', text: '↩ 撤销本次填充', onclick: async () => {
+            const btn = panel.querySelector('.af-btn');
+            btn.disabled = true;
+            await undoFn();
+            toast('已撤销, 恢复原内容');
+          } }) : null,
           h('button', {
             class: 'af-btn ghost', text: '📥 导入页面已填资料到信息库', onclick: () => {
               closePanel();
@@ -285,5 +331,17 @@
     setTimeout(() => t.remove(), ms || 3000);
   }
 
-  AS.overlay = { showSummary, showRecordPanel, showUnlockPrompt, showLearnPanel, toast, closePanel };
+  // 页面字段高亮(用于失败/成功定位)
+  function highlight(el, kind) {
+    if (!el || !el.classList) return;
+    el.classList.remove('af-highlight', 'af-highlight-ok', 'af-highlight-skip');
+    if (kind) el.classList.add(kind);
+  }
+  function clearHighlights() {
+    document.querySelectorAll('.af-highlight,.af-highlight-ok,.af-highlight-skip').forEach((el) => {
+      el.classList.remove('af-highlight', 'af-highlight-ok', 'af-highlight-skip');
+    });
+  }
+
+  AS.overlay = { showSummary, showRecordPanel, showUnlockPrompt, showLearnPanel, showPreview, highlight, clearHighlights, toast, closePanel };
 })();

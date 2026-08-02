@@ -32,23 +32,220 @@
     });
   }
 
+  // ---------- 域名黑白名单 ----------
+  function isSiteAllowed(host, filter) {
+    if (!filter || !filter.mode || filter.mode === 'all') return true;
+    const h = String(host || '').toLowerCase();
+    const match = (list) => (list || []).some((d) => {
+      const x = String(d).trim().toLowerCase().replace(/^\*\./, '');
+      return x && (h === x || h.endsWith('.' + x));
+    });
+    if (filter.mode === 'blacklist') return !match(filter.blacklist);
+    if (filter.mode === 'whitelist') return match(filter.whitelist);
+    return true;
+  }
+
+  // ---------- 撤销快照 ----------
+  function snapshotField(field) {
+    const el = field.el;
+    try {
+      if (field.type === 'checkbox') {
+        return { el, restore: () => { if (el.checked) { el.click(); el.dispatchEvent(new Event('change', { bubbles: true })); } } };
+      }
+      if (field.type === 'radio') {
+        const checked = (field.group || []).find((r) => r.checked);
+        return {
+          el: checked || field.group[0],
+          restore: () => { if (checked) { checked.checked = true; checked.dispatchEvent(new Event('click', { bubbles: true })); } },
+        };
+      }
+      if (field.type === 'select') {
+        const oldValue = el.value;
+        return { el, restore: () => { el.value = oldValue; el.dispatchEvent(new Event('change', { bubbles: true })); } };
+      }
+      const oldValue = el.value;
+      return { el, restore: () => { AS.filler.setNativeValue(el, oldValue); } };
+    } catch (e) { return null; }
+  }
+
+  // ---------- 字段快照恢复(撤销) ----------
+  async function undoAll(snapshots) {
+    for (const s of snapshots) {
+      if (s && s.restore) {
+        try { s.restore(); } catch (e) { /* ignore */ }
+      }
+    }
+    AS.overlay.clearHighlights();
+  }
+
+  // ---------- 匹配计划构建 ----------
+  // 返回 { items: [{field, fieldKey, value, label, ctx}], valueQueues, seenFields }
+  function buildPlan(fields, profile, rule, memories, reuseActive, sections, valueQueues) {
+    const items = [];
+    const seenFields = new Set();
+    const getValues = (fieldKey) => {
+      const key = fieldKey.replace(/\[\d+\]/g, '');
+      if (!valueQueues.has(key)) valueQueues.set(key, AS.matcher.resolveValues(profile, fieldKey));
+      return valueQueues.get(key);
+    };
+    const catAllowed = (fieldKey) => {
+      if (!sections || !sections.length) return true;
+      const catId = fieldKey.replace(/\[\d+\]/g, '').split('.')[0];
+      return sections.includes(catId);
+    };
+
+    for (const field of fields) {
+      if (seenFields.has(field.el)) continue;
+      seenFields.add(field.el);
+      const ctx = AS.matcher.buildContext(field.el);
+      if (!ctx.visible) continue;
+
+      let fieldKey = null;
+      let value = null;
+
+      // 1) 选择器记忆: 同一域名二次填充优先精准选择器
+      const sel = AS.matcher.genSelector(field.el);
+      if (memories && sel && memories[sel]) {
+        const memKey = memories[sel];
+        const vals = getValues(memKey);
+        if (vals.length) { fieldKey = memKey; value = vals.shift(); }
+      }
+      // 2) 复用投递
+      if (!fieldKey && reuseActive) {
+        if (AS.fuzzy.containsAny(ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id, ['公司名称', '公司', '单位名称', 'employer', 'company', 'organization'])) {
+          fieldKey = 'reuse.company';
+          value = reuseActive.company;
+        } else if (AS.fuzzy.containsAny(ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id, ['岗位', '职位', '应聘', 'position', 'job title', 'post'])) {
+          fieldKey = 'reuse.position';
+          value = reuseActive.position;
+        }
+      }
+      // 3) 开放性问题
+      if (!fieldKey && AS.matcher.isOpenQuestionField(ctx)) {
+        const answer = AS.matcher.resolveOpenQuestion(profile, ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name);
+        if (answer !== null) { fieldKey = 'openQuestions'; value = answer; }
+      }
+      // 4) 站点映射 / 关键词匹配
+      if (!fieldKey) {
+        const m = AS.matcher.matchField(ctx, rule);
+        if (m) {
+          fieldKey = m.fieldKey;
+          const vals = getValues(m.fieldKey);
+          if (!vals.length && AS.matcher.isOpenQuestionField(ctx)) {
+            const answer = AS.matcher.resolveOpenQuestion(profile, ctx.labelText + ' ' + ctx.placeholder);
+            if (answer !== null) { fieldKey = 'openQuestions'; value = answer; }
+          } else if (vals.length) {
+            value = vals.shift();
+          } else {
+            fieldKey = null;
+          }
+        }
+      }
+
+      if (!fieldKey || value === null || value === undefined) continue;
+      if (!catAllowed(fieldKey)) continue;
+      const label = ctx.labelText || ctx.placeholder || ctx.name || ctx.id || '未知字段';
+      items.push({ field, fieldKey, value, label, ctx, sel });
+    }
+    return { items, valueQueues, seenFields };
+  }
+
+  // ---------- 执行填充计划 ----------
+  async function executePlan(plan, selectedSet, opts, settings, report) {
+    const snapshots = [];
+    const items = selectedSet ? plan.items.filter((_, i) => selectedSet.has(i)) : plan.items;
+    const memoriesQueue = [];
+
+    for (const item of items) {
+      report.total++;
+      const { field, fieldKey, value, label, ctx, sel } = item;
+      if (!ctx.visible) continue;
+      const snap = snapshotField(field);
+      if (snap) snapshots.push(snap);
+      const r = await AS.filler.fillField(field, value, opts);
+      if (r.ok && r.action === 'filled') {
+        report.filled++;
+        AS.overlay.highlight(field.el, 'af-highlight-ok');
+        // 记录选择器记忆(成功填充且非临时字段)
+        if (sel && fieldKey && !fieldKey.startsWith('reuse.') && fieldKey !== 'openQuestions') {
+          memoriesQueue.push({ sel, fieldKey });
+        }
+      } else if (r.ok && r.action === 'skipped') {
+        report.skipped++;
+        AS.overlay.highlight(field.el, 'af-highlight-skip');
+      } else if (r.action === 'info') {
+        report.infos.push({ label, detail: r.detail });
+      } else if (r.action === 'error') {
+        report.errors++;
+        report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: r.detail || '填充失败' });
+        AS.overlay.highlight(field.el, 'af-highlight');
+      } else {
+        report.unmatched++;
+        report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: r.detail || '未匹配' });
+        AS.overlay.highlight(field.el, 'af-highlight');
+      }
+    }
+
+    // 批量写入选择器记忆(节流: 每轮最多 20 条)
+    try {
+      const host = location.hostname;
+      const slice = memoriesQueue.slice(0, 20);
+      for (const m of slice) {
+        await AS.storage.addMemory(host, m.sel, m.fieldKey);
+      }
+    } catch (e) { LOG().warn('content', 'save memory failed', e); }
+
+    return snapshots;
+  }
+
+  // ---------- 动态行表单: 查找"添加经历"按钮 ----------
+  function findAddRowButton() {
+    try {
+      const candidates = document.querySelectorAll('button, a, span, div, [role="button"]');
+      for (const el of candidates) {
+        if (el.children && el.children.length > 2) continue;
+        const t = (el.textContent || '').trim();
+        if (!t || t.length > 14) continue;
+        if (/^(添加|新增|增加)\s*(一条|一个)?\s*(经历|教育|实习|项目|工作|荣誉|技能)/.test(t) ||
+            /(添加|新增)\s*(实习经历|教育经历|项目经历|工作经历|更多|条目)/.test(t) ||
+            /^(\+|\+|＋)\s*(添加|新增)/.test(t)) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) return el;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
   // ---------- 核心填充流程 ----------
-  async function doFill() {
+  async function doFill(msg) {
     LOG().info('content', 'fill requested in', frameLabel(), frame());
     const t0 = Date.now();
+    const sections = msg && msg.sections && msg.sections.length ? msg.sections : null;
 
-    const [settings, profile, rule, reuse] = await Promise.all([
+    const [settings, profile, rule, reuse, memories] = await Promise.all([
       AS.storage.getSettings(),
       AS.storage.getActiveProfile(),
       AS.storage.getSiteRuleForHost(location.hostname),
       AS.storage.getReusePayload(),
+      AS.storage.getMemoriesForHost(location.hostname),
     ]);
 
-    // 复用载荷: 仅当目标站点匹配时生效
+    // 黑白名单
+    if (!isSiteAllowed(location.hostname, settings.siteFilter)) {
+      AS.overlay.toast('当前网站已被插件禁用(黑白名单设置)');
+      chrome.runtime.sendMessage({
+        type: 'AF_FILL_DONE', payload: { filled: 0, skipped: 0, unmatched: 0, errors: 0, total: 0, unmatchedItems: [], infos: [], blocked: true },
+      }).catch(() => {});
+      return;
+    }
+
+    // 复用载荷
     let reuseActive = null;
     if (reuse && reuse.url && reuse.url.indexOf(location.hostname) >= 0) {
       reuseActive = reuse;
-      LOG().info('content', 'reuse payload active', reuse.company, reuse.position);
     }
 
     const report = { filled: 0, skipped: 0, unmatched: 0, errors: 0, total: 0, unmatchedItems: [], infos: [] };
@@ -72,13 +269,6 @@
       }
     }
 
-    const fields = AS.scanner.scan();
-    const valueQueues = new Map(); // fieldKey -> [values...]
-    const getValues = (fieldKey) => {
-      if (!valueQueues.has(fieldKey)) valueQueues.set(fieldKey, AS.matcher.resolveValues(profile, fieldKey));
-      return valueQueues.get(fieldKey);
-    };
-
     const opts = {
       typing: !!settings.typingMode,
       typingMin: settings.typingMin || 30,
@@ -86,83 +276,64 @@
       conflictMode: settings.conflictMode || 'skip',
     };
 
-    for (const field of fields) {
-      report.total++;
-      const ctx = AS.matcher.buildContext(field.el);
-      if (!ctx.visible) continue;
+    const valueQueues = new Map();
+    const seenFields = new Set();
+    let plan = buildPlan(AS.scanner.scan(), profile, rule, memories, reuseActive, sections, valueQueues);
+    plan.items.forEach((it) => seenFields.add(it.field.el));
 
-      let fieldKey = null;
-      let value = null;
+    const finish = async (snapshots) => {
+      LOG().info('content', 'fill done in ' + frameLabel(), { filled: report.filled, unmatched: report.unmatched, took: (Date.now() - t0) + 'ms' });
+      try { await chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }); } catch (e) { /* noop */ }
+      if (report.filled > 0 || report.skipped > 0) {
+        setTimeout(() => AS.detect.arm(), 800);
+      }
+      if (reuseActive) AS.storage.clearReusePayload();
+      if (report.filled > 0) {
+        AS.overlay.showSummary(report, snapshots && snapshots.length ? () => undoAll(snapshots) : null);
+      } else if (report.unmatched > 0 || report.errors > 0) {
+        AS.overlay.showSummary(report, null);
+      }
+    };
 
-      // 1) 复用投递: 公司/岗位强制使用历史投递信息
-      if (reuseActive) {
-        if (AS.fuzzy.containsAny(ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id, ['公司名称', '公司', '单位名称', 'employer', 'company', 'organization'])) {
-          fieldKey = 'reuse.company';
-          value = reuseActive.company;
-        } else if (AS.fuzzy.containsAny(ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id, ['岗位', '职位', '应聘', 'position', 'job title', 'post'])) {
-          fieldKey = 'reuse.position';
-          value = reuseActive.position;
-        }
-      }
-      // 2) 开放性问题
-      if (!fieldKey && AS.matcher.isOpenQuestionField(ctx)) {
-        const answer = AS.matcher.resolveOpenQuestion(profile, ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name);
-        if (answer !== null) { fieldKey = 'openQuestions'; value = answer; }
-      }
-      // 3) 站点映射 / 关键词匹配
-      if (!fieldKey) {
-        const m = AS.matcher.matchField(ctx, rule);
-        if (m) {
-          fieldKey = m.fieldKey;
-          const vals = getValues(m.fieldKey);
-          // 开放题类型字段回退: 匹配失败时尝试题库
-          if (!vals.length && AS.matcher.isOpenQuestionField(ctx)) {
-            const answer = AS.matcher.resolveOpenQuestion(profile, ctx.labelText + ' ' + ctx.placeholder);
-            if (answer !== null) { fieldKey = 'openQuestions'; value = answer; }
-          } else if (vals.length) {
-            value = vals.shift();
-          } else {
-            fieldKey = null;
-          }
-        }
-      }
-
-      const label = ctx.labelText || ctx.placeholder || ctx.name || ctx.id || '未知字段';
-
-      if (!fieldKey || value === null || value === undefined) {
-        report.unmatched++;
-        report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: '未匹配到信息库字段' });
-        continue;
-      }
-
-      const r = await AS.filler.fillField(field, value, opts);
-      if (r.ok && r.action === 'filled') { report.filled++; }
-      else if (r.ok && r.action === 'skipped') { report.skipped++; }
-      else if (r.action === 'info') { report.infos.push({ label, detail: r.detail }); }
-      else if (r.action === 'error') {
-        report.errors++;
-        report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: r.detail || '填充失败' });
-      } else {
-        report.unmatched++;
-        report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: r.detail || '未匹配' });
-      }
+    // 预览模式
+    if (settings.previewMode && plan.items.length) {
+      AS.overlay.showPreview(plan.items, async (selectedSet) => {
+        const snapshots = await executePlan(plan, selectedSet, opts, settings, report);
+        await finish(snapshots);
+      }, () => {
+        // 取消预览: 空报告
+        chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }).catch(() => {});
+      });
+      return;
     }
 
-    const dur = Date.now() - t0;
-    LOG().info('content', `fill done in ${frameLabel()}`, { filled: report.filled, unmatched: report.unmatched, took: dur + 'ms' });
+    let snapshots = await executePlan(plan, null, opts, settings, report);
 
-    try {
-      await chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report });
-    } catch (e) { LOG().warn('content', 'send fill done failed', e); }
+    // 动态行续填: 值队列还有剩余且存在"添加"按钮
+    const hasRemaining = () => {
+      for (const q of valueQueues.values()) { if (q.length) return true; }
+      return false;
+    };
+    let rounds = 0;
+    while (hasRemaining() && rounds < 3) {
+      const addBtn = findAddRowButton();
+      if (!addBtn) break;
+      LOG().info('content', 'dynamic row button found, clicking to add more');
+      try {
+        addBtn.click();
+      } catch (e) { break; }
+      await sleep(700);
+      const fresh = AS.scanner.scan().filter((f) => !seenFields.has(f.el));
+      if (!fresh.length) break;
+      const extra = buildPlan(fresh, profile, rule, null, reuseActive, sections, valueQueues);
+      extra.items.forEach((it) => seenFields.add(it.field.el));
+      if (!extra.items.length) break;
+      const extraSnaps = await executePlan(extra, null, opts, settings, report);
+      snapshots = snapshots.concat(extraSnaps);
+      rounds++;
+    }
 
-    // 联动: 开启投递完成检测
-    if (report.filled > 0 || report.skipped > 0) {
-      setTimeout(() => AS.detect.arm(), 800);
-    }
-    // 复用载荷使用完毕即清除
-    if (reuseActive) {
-      AS.storage.clearReusePayload();
-    }
+    await finish(snapshots);
   }
 
   // ---------- 页面信息抓取 ----------
@@ -279,6 +450,11 @@
   }
 
   async function collectManualInputs() {
+    const settings = await AS.storage.getSettings();
+    if (!isSiteAllowed(location.hostname, settings.siteFilter)) {
+      AS.overlay.toast('当前网站已被插件禁用(黑白名单设置)');
+      return [];
+    }
     const profile = await AS.storage.getActiveProfile();
     if (!profile) {
       AS.overlay.toast('信息库为空, 请先在配置页创建方案');
@@ -328,7 +504,7 @@
     LOG().debug('content', 'msg received', msg.type);
     switch (msg.type) {
       case 'AF_FILL':
-        doFill();
+        doFill(msg);
         break;
       case 'AF_GRAB_INFO':
         sendResponse(grabPageInfo());

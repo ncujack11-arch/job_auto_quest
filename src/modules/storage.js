@@ -16,15 +16,20 @@
     REMINDERS: 'af_reminders',
     STATUS_FLOW: 'af_status_flow',
     REUSE: 'af_reuse_payload',
+    SITE_MEMORIES: 'af_site_memories',
+    LOGS: 'af_logs',
+    QUIZ: 'af_quiz',
   };
 
   const DEFAULT_SETTINGS = {
-    version: '1.3.0',
+    version: '1.4.0',
     activeProfileId: null,
     conflictMode: 'skip',        // 'skip' | 'overwrite'
     typingMode: false,           // 逐字模拟输入
     typingMin: 30,               // 逐字输入间隔范围(ms)
     typingMax: 120,
+    previewMode: true,           // 填充前预览确认
+    siteFilter: { mode: 'all', blacklist: [], whitelist: [] },  // 域名黑白名单
     logLevel: 'info',
     encryption: { enabled: false, salt: '', iterations: 100000, passwordHash: '', hint: '' },
   };
@@ -226,6 +231,58 @@
   async function getReusePayload() { return (await get(KEYS.REUSE, null)) || null; }
   async function clearReusePayload() { await set(KEYS.REUSE, null); }
 
+  // ---------- 选择器记忆 (同一域名填充成功后记忆 选择器→字段) ----------
+  async function getSiteMemories() { return (await get(KEYS.SITE_MEMORIES, {})) || {}; }
+  async function saveSiteMemories(map) { await set(KEYS.SITE_MEMORIES, map || {}); }
+  async function getMemoriesForHost(host) {
+    const map = await getSiteMemories();
+    return map[String(host || '').toLowerCase()] || null;
+  }
+  async function addMemory(host, selector, fieldKey) {
+    const map = await getSiteMemories();
+    const h = String(host || '').toLowerCase();
+    if (!map[h]) map[h] = {};
+    map[h][selector] = fieldKey;
+    // 单域名记忆上限, 防膨胀
+    const keys = Object.keys(map[h]);
+    if (keys.length > 400) {
+      keys.slice(0, keys.length - 400).forEach((k) => delete map[h][k]);
+    }
+    await set(KEYS.SITE_MEMORIES, map);
+  }
+  async function clearMemoriesForHost(host) {
+    const map = await getSiteMemories();
+    delete map[String(host || '').toLowerCase()];
+    await set(KEYS.SITE_MEMORIES, map);
+  }
+  async function countMemories() {
+    const map = await getSiteMemories();
+    return Object.values(map).reduce((a, h) => a + Object.keys(h || {}).length, 0);
+  }
+
+  // ---------- 本地日志缓冲 (环形) ----------
+  const LOG_MAX = 300;
+  async function appendLog(entry) {
+    try {
+      const list = (await get(KEYS.LOGS, [])) || [];
+      list.push(entry);
+      while (list.length > LOG_MAX) list.shift();
+      await set(KEYS.LOGS, list);
+    } catch (e) { /* 日志写入失败不影响主流程 */ }
+  }
+  async function getLogs() { return (await get(KEYS.LOGS, [])) || []; }
+  async function clearLogs() { await set(KEYS.LOGS, []); }
+
+  // ---------- 笔试题库 ----------
+  async function getQuiz() { return (await get(KEYS.QUIZ, [])) || []; }
+  async function saveQuiz(list) { await set(KEYS.QUIZ, list || []); }
+  async function addQuizItem(item) {
+    const list = await getQuiz();
+    const dup = list.some((q) => q.question === item.question && q.answer === item.answer);
+    if (!dup) { list.push(item); await saveQuiz(list); }
+    return !dup;
+  }
+
   // ---------- 备份 / 恢复 ----------
   async function exportAll() {
     return {
@@ -239,6 +296,8 @@
         applications: await getApplications(),
         reminders: await getReminders(),
         statusFlow: await getStatusFlow(),
+        siteMemories: await getSiteMemories(),
+        quiz: await getQuiz(),
       },
     };
   }
@@ -251,6 +310,8 @@
     if (overwrite || d.applications) await set(KEYS.APPLICATIONS, d.applications || []);
     if (overwrite || d.reminders) await set(KEYS.REMINDERS, d.reminders || []);
     if (overwrite || d.statusFlow) await set(KEYS.STATUS_FLOW, d.statusFlow || DEFAULT_STATUS_FLOW);
+    if (overwrite || d.siteMemories) await set(KEYS.SITE_MEMORIES, d.siteMemories || {});
+    if (overwrite || d.quiz) await set(KEYS.QUIZ, d.quiz || []);
   }
   async function clearAll() {
     await chrome.storage.local.clear();
@@ -266,6 +327,9 @@
     getStatusFlow, saveStatusFlow,
     getReminders, saveReminders,
     setReusePayload, getReusePayload, clearReusePayload,
+    getSiteMemories, saveSiteMemories, getMemoriesForHost, addMemory, clearMemoriesForHost, countMemories,
+    appendLog, getLogs, clearLogs,
+    getQuiz, saveQuiz, addQuizItem,
     exportAll, importAll, clearAll,
   };
 })();

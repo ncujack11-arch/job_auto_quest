@@ -90,6 +90,21 @@
     conflict.appendChild(sel);
     form.appendChild(conflict);
 
+    const previewItem = UI().el('div', { class: 'form-item' });
+    previewItem.appendChild(UI().el('label', { text: '填充前预览确认' }));
+    const pWrap = UI().el('div', { style: 'display:flex;gap:8px;align-items:center' });
+    const pCheck = UI().el('input', {
+      type: 'checkbox', checked: settings.previewMode !== false,
+      onchange: async (e) => {
+        settings.previewMode = e.target.checked;
+        await AS.storage.saveSettings(settings);
+      },
+    });
+    pWrap.appendChild(pCheck);
+    pWrap.appendChild(UI().el('span', { style: 'font-size:12px;color:#6b7280', text: '填充前展示每个字段将填入的值, 可勾选跳过, 填充后可一键撤销' }));
+    previewItem.appendChild(pWrap);
+    form.appendChild(previewItem);
+
     const typingItem = UI().el('div', { class: 'form-item' });
     typingItem.appendChild(UI().el('label', { text: '人工模拟输入(逐字输入, 规避反爬)' }));
     const tWrap = UI().el('div', { style: 'display:flex;gap:8px;align-items:center' });
@@ -105,6 +120,94 @@
     typingItem.appendChild(tWrap);
     form.appendChild(typingItem);
     card.appendChild(form);
+  }
+
+  // ---------- 域名黑白名单 ----------
+  function renderSiteFilter(card) {
+    const filter = settings.siteFilter || { mode: 'all', blacklist: [], whitelist: [] };
+    settings.siteFilter = filter;
+    card.appendChild(UI().el('h3', { text: '域名黑白名单', children: [UI().el('span', { class: 'badge', text: '隐私保护' })] }));
+    card.appendChild(UI().el('p', { class: 'view-sub', style: 'margin-bottom:12px', text: '银行、支付、政务等敏感网站建议加入黑名单, 插件将拒绝在其页面上运行, 防止误操作。' }));
+
+    const modeSel = UI().el('select', {
+      style: 'padding:8px 10px;border:1px solid #e2e8f0;border-radius:8px;max-width:320px',
+      onchange: async (e) => {
+        filter.mode = e.target.value;
+        await AS.storage.saveSettings(settings);
+      },
+    });
+    modeSel.appendChild(UI().el('option', { value: 'all', text: '全部网站运行(默认)' }));
+    modeSel.appendChild(UI().el('option', { value: 'blacklist', text: '黑名单模式: 仅黑名单网站禁用' }));
+    modeSel.appendChild(UI().el('option', { value: 'whitelist', text: '白名单模式: 仅白名单招聘网站启用' }));
+    modeSel.value = filter.mode;
+    card.appendChild(UI().el('div', { class: 'form-item', style: 'max-width:360px' }, [UI().el('label', { text: '运行模式' }), modeSel]));
+
+    const renderList = (listKey, title, ph) => {
+      const wrap = UI().el('div', { style: 'margin-top:14px' });
+      wrap.appendChild(UI().el('b', { style: 'font-size:13px', text: title }));
+      const listEl = UI().el('div', { style: 'margin-top:6px' });
+      const renderItems = () => {
+        listEl.innerHTML = '';
+        (filter[listKey] || []).forEach((d, i) => {
+          const row = UI().el('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:6px;max-width:420px' });
+          row.appendChild(UI().el('span', { style: 'flex:1;font-size:13px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:5px 10px', text: d }));
+          row.appendChild(UI().el('button', {
+            class: 'btn sm danger', text: '移除', onclick: async () => {
+              filter[listKey] = filter[listKey].filter((x) => x !== d);
+              await AS.storage.saveSettings(settings);
+              renderItems();
+            },
+          }));
+          listEl.appendChild(row);
+        });
+      };
+      renderItems();
+      const input = UI().el('input', {
+        type: 'text', placeholder: ph, style: 'max-width:300px;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px',
+        onkeydown: async (e) => {
+          if (e.key === 'Enter' && e.target.value.trim()) {
+            filter[listKey] = filter[listKey] || [];
+            const v = e.target.value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+            if (!filter[listKey].includes(v)) filter[listKey].push(v);
+            await AS.storage.saveSettings(settings);
+            e.target.value = '';
+            renderItems();
+          }
+        },
+      });
+      wrap.appendChild(listEl);
+      wrap.appendChild(input);
+      return wrap;
+    };
+    card.appendChild(renderList('blacklist', '黑名单(输入域名后回车)', '如: icbc.com.cn (支持子域名自动匹配)'));
+    card.appendChild(renderList('whitelist', '白名单', '如: zhaopin.com'));
+  }
+
+  // ---------- 选择器记忆管理 ----------
+  function renderMemories(card) {
+    card.appendChild(UI().el('h3', { text: '选择器记忆', children: [UI().el('span', { class: 'badge', text: '同站二次填充更准' })] }));
+    card.appendChild(UI().el('p', { class: 'view-sub', style: 'margin-bottom:12px', text: '填充成功后自动记录该网站每个字段对应的元素选择器, 下次优先精准填充。' }));
+    const info = UI().el('div', { style: 'font-size:13px;color:#374151;margin-bottom:10px' });
+    const renderInfo = async () => {
+      const map = await AS.storage.getSiteMemories();
+      const hosts = Object.keys(map).filter((h) => map[h] && Object.keys(map[h]).length);
+      info.innerHTML = '';
+      info.appendChild(document.createTextNode(`已记忆 ${hosts.length} 个域名`));
+      hosts.slice(0, 8).forEach((h) => info.appendChild(UI().el('div', { style: 'font-size:12px;color:#6b7280;margin-top:2px', text: `· ${h} (${Object.keys(map[h]).length} 条)` })));
+      if (hosts.length > 8) info.appendChild(UI().el('div', { style: 'font-size:12px;color:#9ca3af', text: `· 等 ${hosts.length - 8} 个更多` }));
+    };
+    renderInfo();
+    card.appendChild(info);
+    card.appendChild(UI().el('div', { class: 'toolbar' }, [
+      UI().el('button', {
+        class: 'btn danger', text: '清空全部记忆', onclick: async () => {
+          if (!confirm('清空所有站点的选择器记忆?')) return;
+          await AS.storage.saveSiteMemories({});
+          renderInfo();
+          UI().toast('已清空', 'success');
+        },
+      }),
+    ]));
   }
 
   function renderEncryption(card) {
@@ -338,6 +441,10 @@
 
     const c1 = UI().el('div', { class: 'card' });
     renderFillPolicy(c1);
+    const cFilter = UI().el('div', { class: 'card' });
+    renderSiteFilter(cFilter);
+    const cMem = UI().el('div', { class: 'card' });
+    renderMemories(cMem);
     const cFlow = UI().el('div', { class: 'card' });
     renderStatusFlow(cFlow);
     const c2 = UI().el('div', { class: 'card' });
