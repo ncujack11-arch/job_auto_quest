@@ -334,9 +334,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
 
     case 'AF_GRAB_READY':
-      // 填充完成后页面投递信息缓存(Popup 一键保存)
+      // 填充完成后页面投递信息缓存(Popup 一键保存 / JD 三级回退)
       if (msg && msg.info) {
-        chrome.storage.local.set({ af_last_grab: msg.info }).catch(() => {});
+        chrome.storage.local.set({ af_last_grab: Object.assign({}, msg.info, { grabbedAt: Date.now(), hostname: msg.hostname || '' }) }).catch(() => {});
       }
       break;
 
@@ -402,6 +402,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case 'AF_RECORD_NOW': {
+      getActiveTab().then((tab) => {
+        if (!tab || !isHttpTab(tab)) return;
+        onSubmissionDetected(tab, {});
+      });
+      break;
+    }
+
+    case 'AF_RECORD_JD': {
+      // 记录本页 JD 快照(岗位详情页主动记录; 表单页保存时 JD 自动回退缓存, 防串台)
       getActiveTab().then((tab) => {
         if (!tab || !isHttpTab(tab)) return;
         onSubmissionDetected(tab, {});

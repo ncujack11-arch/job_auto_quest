@@ -644,6 +644,7 @@
         chrome.runtime.sendMessage({ type: 'AF_START_COUNTDOWN', minutes: n });
       });
       addRow('📋', '记录本次投递', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_RECORD_NOW' }); });
+      addRow('📄', '记录本页 JD 快照', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_RECORD_JD' }); });
       addRow('📥', '捕获页面已填内容', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT' }); });
       panel.appendChild(head);
       panel.appendChild(body);

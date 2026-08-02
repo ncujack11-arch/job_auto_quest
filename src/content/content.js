@@ -326,9 +326,10 @@
           const info = grabPageInfo();
           chrome.runtime.sendMessage({
             type: 'AF_GRAB_READY',
+            hostname: location.hostname.replace(/^www\./, ''),
             info: {
               company: info.company, position: info.position, city: info.city, salary: info.salary,
-              url: info.url, channel: info.channel, grabbedAt: Date.now(),
+              url: info.url, channel: info.channel, jdSnapshot: info.jdSnapshot || '', grabbedAt: Date.now(),
             },
           }).catch(() => {});
         } catch (e) { /* ignore */ }
@@ -553,11 +554,14 @@
       if (el && el.textContent && el.textContent.trim().length > 30) { jd = el.textContent.trim(); break; }
     }
     if (!jd) {
-      const marker = bodyText.indexOf('职位描述');
-      if (marker >= 0) jd = bodyText.slice(marker, marker + 2500).trim();
-      else if (bodyText.indexOf('岗位职责') >= 0) {
-        const m2 = bodyText.indexOf('岗位职责');
-        jd = bodyText.slice(m2, m2 + 2500).trim();
+      // 通用正文兜底: 各网申系统 JD 区措辞不同, 用关键词表定位段落
+      const JD_MARKERS = ['职位描述', '岗位描述', '岗位职责', '工作职责', '职责描述', '岗位要求', '任职要求', '职位要求', '工作内容', '工作要求', 'Job Description', 'Job Responsibilities', 'Responsibilities'];
+      for (const mk of JD_MARKERS) {
+        const idx = bodyText.indexOf(mk);
+        if (idx >= 0) {
+          jd = bodyText.slice(idx, idx + 3000).trim();
+          break;
+        }
       }
     }
     if (jd.length > 4000) jd = jd.slice(0, 4000);
@@ -780,7 +784,27 @@
         break;
       case 'AF_SHOW_RECORD':
         if (isCurrent() && window.top === window) {
-          setTimeout(() => AS.overlay.showRecordPanel(msg.info || {}), 200);
+          setTimeout(async () => {
+            // JD 多级回退(全部自动, 无需手动): 当前页抓取 → 详情页缓存(岗位ID+时间窗校验防串台) → 本次会话页面抓取记录
+            const info = Object.assign({}, msg.info || {});
+            if (!info.jdSnapshot) {
+              const cached = await matchCachedJD();
+              if (cached) { info.jdSnapshot = cached.jdSnapshot; info.jdFrom = cached.sourceLabel; }
+              else {
+                // 三级兜底: 同会话内本域名页面抓取过的 JD(如用户直接打开投递页且页面含 JD 文本)
+                try {
+                  const r = await chrome.storage.local.get('af_last_grab');
+                  const g = r.af_last_grab;
+                  if (g && g.jdSnapshot && g.grabbedAt && Date.now() - g.grabbedAt <= 60 * 60 * 1000
+                    && location.hostname.replace(/^www\./, '') === String(g.hostname || '').replace(/^www\./, '')) {
+                    info.jdSnapshot = g.jdSnapshot;
+                    info.jdFrom = '本次会话页面抓取';
+                  }
+                } catch (e) { /* ignore */ }
+              }
+            }
+            AS.overlay.showRecordPanel(info);
+          }, 200);
         }
         break;
       case 'AF_SHOW_FLOAT':
@@ -867,7 +891,7 @@
     }
   });
 
-  AS.contentMain = { doFill, grabPageInfo, collectManualInputs };
+  AS.contentMain = { doFill, grabPageInfo, collectManualInputs, isJDPageLike, cacheCurrentJD, matchCachedJD, extractJobId };
 
   // ---------- 右键快捷复制: 输入框右键弹「快速复制」菜单, 一键复制常用字段值 ----------
   const COPY_FIELDS = [
@@ -964,9 +988,92 @@
   });
   window.addEventListener('scroll', closeCopyMenu, true);
 
+  // ---------- JD 详情页缓存与防串台校验 ----------
+  // 岗位详情页(有 JD 文本块 + 几乎无表单)自动缓存 JD; 保存投递时经
+  // 「岗位ID 或 同域名 + 时间窗(30 分钟)」校验后才允许回退, 保证 JD 与投递记录是同一家
+  function extractJobId(url) {
+    try {
+      const m = String(url || '').match(/\/job\/([a-zA-Z0-9-]+)/);
+      return m ? m[1] : '';
+    } catch (e) { return ''; }
+  }
+  function isJDPageLike() {
+    try {
+      const bodyText = (document.body && document.body.innerText) || '';
+      // 各公司 JD 页措辞/结构不同, 用宽关键词表 + 文本量 + 表单数综合判定
+      const JD_WORDS = /(职位描述|岗位描述|岗位职责|工作职责|职责描述|岗位要求|任职要求|职位要求|工作内容|工作要求|福利待遇|薪资范围|招聘人数|Job Description|Responsibilities|工作地点|关于我们)/;
+      const hasJDText = JD_WORDS.test(bodyText);
+      if (!hasJDText) return false;
+      // 详情页特征: JD 文本量充足(> 40 字)且表单控件少(≤ 3)
+      let jdLen = 0;
+      const jdSelectors = ['#job-desc', '#jobDescription', '.job-desc', '.job-description', '.job-detail', '.job_detail', '.position-desc', '[class*="job-desc"]', '[class*="job_detail"]', '[class*="position-desc"]'];
+      for (const sel of jdSelectors) {
+        const el = document.querySelector(sel);
+        if (el && el.textContent) { jdLen = Math.max(jdLen, el.textContent.trim().length); }
+      }
+      const formCount = document.querySelectorAll('input:not([type="hidden"]),select,textarea').length;
+      if (jdLen >= 40) return true;
+      return formCount <= 3 && bodyText.length > 400;
+    } catch (e) { return false; }
+  }
+  async function cacheCurrentJD() {
+    try {
+      if (!isJDPageLike()) return null;
+      const info = grabPageInfo();
+      if (!info.jdSnapshot) return null;
+      const cached = {
+        jdSnapshot: info.jdSnapshot,
+        company: info.company, position: info.position, city: info.city, salary: info.salary,
+        url: location.href,
+        hostname: location.hostname.replace(/^www\./, ''),
+        jobId: extractJobId(location.href),
+        grabbedAt: Date.now(),
+      };
+      const prev = await chrome.storage.local.get('af_last_jd');
+      // 仅覆盖同一岗位(防不同岗位串台)
+      const old = prev.af_last_jd;
+      if (old && (old.jobId && old.jobId !== cached.jobId)) return old;
+      await chrome.storage.local.set({ af_last_jd: cached });
+      return cached;
+    } catch (e) { return null; }
+  }
+  async function matchCachedJD() {
+    try {
+      const r = await chrome.storage.local.get('af_last_jd');
+      const c = r.af_last_jd;
+      if (!c || !c.jdSnapshot) return null;
+      // 时间窗: 30 分钟内(浏览详情页后随即点投递)
+      if (Date.now() - c.grabbedAt > 30 * 60 * 1000) return null;
+      const curJobId = extractJobId(location.href);
+      const sameJob = !!curJobId && !!c.jobId && curJobId === c.jobId;
+      // 双方都有岗位 ID 且不同 → 直接拒绝(防同域名不同岗位串台)
+      if (curJobId && c.jobId && !sameJob) return null;
+      if (!sameJob) {
+        // 岗位 ID 缺失时(部分系统 URL 无岗位标识): 同域名 + 页面正文含缓存公司/岗位名才通过
+        const sameHost = location.hostname.replace(/^www\./, '') === c.hostname;
+        if (!sameHost) return null;
+        try {
+          const body = (document.body && document.body.innerText || '').slice(0, 5000);
+          if (c.company && body.includes(c.company)) { /* 通过 */ }
+          else if (c.position && body.includes(c.position)) { /* 通过 */ }
+          else return null;
+        } catch (e) { return null; }
+      }
+      return {
+        jdSnapshot: c.jdSnapshot,
+        sourceLabel: `详情页缓存(${c.company || c.hostname || ''} · ${new Date(c.grabbedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })})`,
+      };
+    } catch (e) { return null; }
+  }
+
   // 注入后: 显示站点避坑提示(仅顶层框架)
   if (window.top === window) {
     showSiteTips();
+    // JD 详情页: 自动缓存 JD(供投递表单页记录时回退, 防串台校验在 matchCachedJD)
+    // 页面内容可能异步渲染, 定时重试(1.5s / 4s / 8s)直至抓到
+    [1500, 4000, 8000].forEach((ms) => {
+      setTimeout(() => { cacheCurrentJD().catch(() => {}); }, ms);
+    });
     // 就绪提示(诊断用, 每会话一次): 确认插件已注入且能扫描到字段
     try {
       if (!sessionStorage.getItem('af_ready_shown')) {
