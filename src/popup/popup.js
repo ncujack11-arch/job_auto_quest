@@ -158,6 +158,14 @@
           if (st && st.state) {
             const s = st.state;
             const line = `填充状态 [${s.v}]: ${s.stage}${s.detail ? ' — ' + s.detail : ''}`;
+            // 预览等待: 显示一键确认按钮
+            const confirmBtn = $('previewConfirmBtn');
+            if (s.stage === 'waiting-preview') {
+              confirmBtn.classList.remove('hidden');
+              confirmBtn.textContent = '✔ 立即确认填充(' + ((st.scanned > 0 ? st.scanned : '?') + ' 个字段)');
+            } else {
+              confirmBtn.classList.add('hidden');
+            }
             if (s.stage !== lastStage) {
               lastStage = s.stage;
               setStatus(s.stage === 'error' || s.stage === 'cancelled' ? 'error' : 'ok', [
@@ -238,6 +246,15 @@
       if (!ok) { showStatus('error', '无法注入脚本, 请刷新页面'); return; }
       await chrome.runtime.sendMessage({ type: 'AF_DIAGNOSTIC' }).catch(() => {});
       window.close();
+    });
+    $('previewConfirmBtn').addEventListener('click', async () => {
+      if (!currentTab) return;
+      try {
+        await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_PREVIEW_CONFIRM' });
+        $('previewConfirmBtn').classList.add('hidden');
+      } catch (e) {
+        showStatus('error', '确认失败: ' + (e.message || e));
+      }
     });
     $('manualRecord').addEventListener('click', async () => {
       if (!currentTab) return;

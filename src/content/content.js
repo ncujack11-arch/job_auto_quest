@@ -507,20 +507,30 @@
     // 预览模式(手动)
     if (!isAuto && settings.previewMode && plan.items.length) {
       setFillState('waiting-preview', '等待在预览面板点击「确认填充」(如面板不可见将 120 秒后自动继续)');
-      AS.overlay.showPreview(plan.items, async (selectedSet) => {
-        const r = await executePlan(plan, selectedSet, opts, settings, report);
-        await finish(r.snapshots, r.unmatchedEls, true);
+      // 保存确认回调: popup 可发送 AF_PREVIEW_CONFIRM 直接确认, 无需在页面点击
+      window.__af_preview_confirm = (selectedSet) => {
+        executePlan(plan, selectedSet, opts, settings, report)
+          .then((r) => finish(r.snapshots, r.unmatchedEls, true))
+          .catch((e) => LOG().warn('content', 'preview confirm exec failed', e));
         AS.overlay.ensureFloatBall();
         if (settings.autoNext) autoNextLoop();
+      };
+      AS.overlay.showPreview(plan.items, (selectedSet) => {
+        window.__af_preview_confirm = null;
+        window.__af_preview_confirm_cb && (window.__af_preview_confirm_cb = null);
+        window.__af_preview_confirm(selectedSet);
       }, () => {
+        window.__af_preview_confirm = null;
         setFillState('cancelled', '用户在预览面板取消');
         chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }).catch(() => {});
       });
       // 预览确认超时保护: 面板不可见时 120 秒后按全部字段继续
       setTimeout(() => {
-        if (!window.__af_fill_state || window.__af_fill_state.stage === 'waiting-preview') {
+        if (window.__af_preview_confirm && (!window.__af_fill_state || window.__af_fill_state.stage === 'waiting-preview')) {
           setFillState('auto-continue', '预览等待超时, 自动按全部字段继续');
-          executePlan(plan, null, opts, settings, report).then((r) => finish(r.snapshots, r.unmatchedEls, true)).catch((e) => LOG().warn('content', 'auto continue failed', e));
+          const fn = window.__af_preview_confirm;
+          window.__af_preview_confirm = null;
+          fn(null);
         }
       }, 120000);
       return;
@@ -953,6 +963,14 @@
         sendResponse({ state: (window.__af_fill_state || null), scanned: (() => {
           try { return AS.scanner.scan().length; } catch (e) { return -1; }
         })() });
+        break;
+      case 'AF_PREVIEW_CONFIRM':
+        // popup 一键确认预览(无需在页面点击)
+        if (window.__af_preview_confirm) {
+          const fn = window.__af_preview_confirm;
+          window.__af_preview_confirm = null;
+          fn(null);
+        }
         break;
       case 'AF_LEARN_COLLECT':
         if (isCurrent()) {
