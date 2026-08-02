@@ -198,6 +198,7 @@
       done++;
       const { field, fieldKey, value, label, ctx, sel } = item;
       if (total > 3 && done % 2 === 0) AS.overlay.showProgress(done, total, '正在填充');
+      setFillState('filling', `正在填充 ${done}/${total}: ${label || fieldKey || '字段'}`);
       if (!ctx.visible) continue;
       const snap = snapshotField(field);
       if (snap) snapshots.push(snap);
@@ -322,6 +323,13 @@
     }
   }
 
+  // 填充状态机(隔离世界全局, popup 轮询读取, 绕开消息链路保证可见)
+  function setFillState(stage, detail) {
+    try {
+      window.__af_fill_state = { stage: stage || '', detail: detail || '', ts: Date.now(), v: AS.__v || '' };
+    } catch (e) { /* ignore */ }
+  }
+
   // 进度上报(经后台广播给 popup, 不依赖页面 overlay, 保证状态可见)
   function reportProgress(stage, extra) {
     try {
@@ -357,10 +365,12 @@
       if (window.top === window) {
         safeToast('▶ 收到填充命令, 开始执行...', 2500);
       }
+      setFillState('start', 'doFill 已开始');
       reportProgress('start');
       await withTimeout(doFillInner(msg, t0), 45000, 'fill');
     } catch (e) {
       LOG().error('content', 'doFill failed', e);
+      setFillState('error', (e && e.message ? e.message.slice(0, 120) : String(e)));
       reportProgress('error', { message: (e && e.message ? e.message.slice(0, 120) : String(e)) });
       try {
         AS.overlay.toast('填充异常: ' + (e && e.message ? e.message.slice(0, 80) : e));
@@ -434,18 +444,18 @@
     // 经历素材选择器(仅手动模式 + 预览开启时)
     let expOrder = null;
     if (!isAuto && settings.previewMode && hasMultiEntries(profile)) {
-      expOrder = await new Promise((resolve) => {
+      setFillState('waiting-picker', '等待在页面选择经历(如面板不可见将 60 秒后自动继续)');
+      expOrder = await withTimeout(new Promise((resolve) => {
         AS.overlay.showExperiencePicker(profile, resolve);
-      });
-      if (expOrder === undefined) {
-        // 面板被直接关闭: 视为取消本次填充
-        chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }).catch(() => {});
-        return;
+      }), 60000, 'experience-picker').catch(() => null);
+      if (expOrder === undefined || expOrder === null) {
+        expOrder = null; // 超时/关闭: 使用全部经历继续
       }
     }
 
     const scannedFields = AS.scanner.scan();
     report.total = scannedFields.length;
+    setFillState('scan', `扫描到 ${scannedFields.length} 个表单字段`);
     reportProgress('scan', { total: scannedFields.length });
     if (window.top === window && scannedFields.length > 0) {
       safeToast(`🔍 扫描到 ${scannedFields.length} 个表单字段, 正在匹配...`, 3000);
@@ -457,6 +467,7 @@
       report.unmatched++;
       report.unmatchedItems.push({ signature: u.signature, label: u.label, reason: u.reason });
     });
+    setFillState('match', `匹配到 ${plan.items.length} 个字段可填充, 未匹配 ${plan.unmatchedFields.length}`);
     reportProgress('match', { matched: plan.items.length, unmatched: plan.unmatchedFields.length });
     if (!plan.items.length) {
       // 完全没有可填充字段: 明确反馈, 避免"没反应"
@@ -474,6 +485,7 @@
 
     const finish = async (snapshots, unmatchedEls, withPanel) => {
       LOG().info('content', 'fill done in ' + frameLabel(), { filled: report.filled, unmatched: report.unmatched, took: (Date.now() - t0) + 'ms' });
+      setFillState('done', `成功 ${report.filled} · 跳过 ${report.skipped} · 未匹配 ${report.unmatched}${report.notEffective ? ' · 未生效 ' + report.notEffective : ''}`);
       reportProgress('done', { filled: report.filled, skipped: report.skipped, unmatched: report.unmatched, errors: report.errors, notEffective: report.notEffective || 0 });
       try { await chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }); } catch (e) { /* noop */ }
       if (report.filled > 0 || report.skipped > 0) {
@@ -494,14 +506,23 @@
 
     // 预览模式(手动)
     if (!isAuto && settings.previewMode && plan.items.length) {
+      setFillState('waiting-preview', '等待在预览面板点击「确认填充」(如面板不可见将 120 秒后自动继续)');
       AS.overlay.showPreview(plan.items, async (selectedSet) => {
         const r = await executePlan(plan, selectedSet, opts, settings, report);
         await finish(r.snapshots, r.unmatchedEls, true);
         AS.overlay.ensureFloatBall();
         if (settings.autoNext) autoNextLoop();
       }, () => {
+        setFillState('cancelled', '用户在预览面板取消');
         chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }).catch(() => {});
       });
+      // 预览确认超时保护: 面板不可见时 120 秒后按全部字段继续
+      setTimeout(() => {
+        if (!window.__af_fill_state || window.__af_fill_state.stage === 'waiting-preview') {
+          setFillState('auto-continue', '预览等待超时, 自动按全部字段继续');
+          executePlan(plan, null, opts, settings, report).then((r) => finish(r.snapshots, r.unmatchedEls, true)).catch((e) => LOG().warn('content', 'auto continue failed', e));
+        }
+      }, 120000);
       return;
     }
 
@@ -927,6 +948,11 @@
       }
       case 'AF_PING':
         sendResponse({ pong: true, v: AS.__v || '' });
+        break;
+      case 'AF_GET_FILL_STATE':
+        sendResponse({ state: (window.__af_fill_state || null), scanned: (() => {
+          try { return AS.scanner.scan().length; } catch (e) { return -1; }
+        })() });
         break;
       case 'AF_LEARN_COLLECT':
         if (isCurrent()) {

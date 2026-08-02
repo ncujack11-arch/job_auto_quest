@@ -148,11 +148,49 @@
       const all = $('allSections').checked;
       const sections = all ? [] : Array.from(document.querySelectorAll('#sectionsGrid input:checked')).map((c) => c.value);
       await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_FILL', sections });
-      setStatus('ok', [
-        `注入完成: v${p2.v}`,
-        `扫描到字段: ${fields}`,
-        '填充命令已发送 ✓ 请查看页面右下角的提示',
-      ]);
+      // 轮询填充状态(直接查询内容脚本, 绕开后台上报链路)
+      const t0poll = Date.now();
+      let lastStage = '';
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        try {
+          const st = await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_GET_FILL_STATE' });
+          if (st && st.state) {
+            const s = st.state;
+            const line = `填充状态 [${s.v}]: ${s.stage}${s.detail ? ' — ' + s.detail : ''}`;
+            if (s.stage !== lastStage) {
+              lastStage = s.stage;
+              setStatus(s.stage === 'error' || s.stage === 'cancelled' ? 'error' : 'ok', [
+                `注入完成: v${p2.v}`,
+                `扫描到字段: ${fields}`,
+                line,
+              ]);
+            }
+            if (s.stage === 'done' || s.stage === 'error' || s.stage === 'cancelled') {
+              if (s.stage !== 'done') {
+                setStatus('error', [`填充结束: ${s.stage}`, s.detail || '']);
+              }
+              break;
+            }
+          } else {
+            setStatus('', [`注入完成: v${p2.v}`, `扫描到字段: ${fields}`, '等待内容脚本响应填充状态...']);
+          }
+        } catch (e) {
+          setStatus('error', ['状态查询失败: ' + (e.message || e), '请刷新页面后重试']);
+          break;
+        }
+        if (Date.now() - t0poll > 25000) {
+          setStatus('', [`注入完成: v${p2.v}`, `扫描到字段: ${fields}`, '填充执行中(>25秒), 请查看页面右下角面板']);
+          break;
+        }
+      }
+      if (!lastStage) {
+        setStatus('ok', [
+          `注入完成: v${p2.v}`,
+          `扫描到字段: ${fields}`,
+          '填充命令已发送 ✓ 请查看页面右下角的提示',
+        ]);
+      }
     } catch (e) {
       setStatus('error', ['填充失败: ' + (e.message || e), '— 请刷新页面后重试']);
     } finally {
