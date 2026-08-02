@@ -327,6 +327,9 @@
     LOG().info('content', 'fill requested in', frameLabel(), frame());
     const t0 = Date.now();
     try {
+      if (window.top === window) {
+        AS.overlay.toast('▶ 收到填充命令, 开始执行...', 2500);
+      }
       await doFillInner(msg, t0);
     } catch (e) {
       LOG().error('content', 'doFill failed', e);
@@ -933,5 +936,16 @@
   // 注入后: 显示站点避坑提示(仅顶层框架)
   if (window.top === window) {
     showSiteTips();
+    // 就绪提示(诊断用, 每会话一次): 确认插件已注入且能扫描到字段
+    try {
+      if (!sessionStorage.getItem('af_ready_shown')) {
+        sessionStorage.setItem('af_ready_shown', '1');
+        setTimeout(() => {
+          try {
+            AS.overlay.toast(`✅ 插件已就绪 v${AS.__v}, 扫描到 ${AS.scanner.scan().length} 个字段`, 5000);
+          } catch (e) { /* ignore */ }
+        }, 900);
+      }
+    } catch (e) { /* ignore */ }
   }
 })();

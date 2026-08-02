@@ -92,30 +92,69 @@
     }
   }
 
+  // 状态显示(多行诊断)
+  function setStatus(cls, lines) {
+    const el = $('fillStatus');
+    el.className = 'fill-status ' + cls;
+    el.innerHTML = '';
+    (Array.isArray(lines) ? lines : [lines]).forEach((l) => {
+      const d = document.createElement('div');
+      d.textContent = l;
+      el.appendChild(d);
+    });
+    el.classList.remove('hidden');
+  }
+
+  async function pingTab() {
+    try {
+      const r = await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_PING' });
+      return { ok: !!(r && r.pong), v: r ? (r.v || '?') : '' };
+    } catch (e) {
+      return { ok: false, v: '' };
+    }
+  }
+
   async function fill() {
     if (!currentTab) return;
     $('fillBtn').disabled = true;
     $('fillBtn').textContent = '填充中...';
-    $('fillStatus').classList.add('hidden');
     try {
       const active = await AS.storage.getActiveProfile();
       if (!active) {
-        showStatus('error', '信息库为空, 请先在配置页录入个人信息');
+        setStatus('error', ['信息库为空, 请先在配置页录入个人信息']);
         return;
       }
-      // 确保内容脚本已注入(扩展更新后旧页面可能未加载新脚本, 本地兜底注入)
+      const mine = chrome.runtime.getManifest().version;
+      const p1 = await pingTab();
+      setStatus('', [`扩展版本: v${mine}`, `页面脚本: ${p1.ok ? '已注入 v' + p1.v : '未注入'}`]);
+      // 确保内容脚本已注入(版本不一致自动重注入)
       const ok = await ensureContentScript();
       if (!ok) {
-        showStatus('error', '无法注入脚本, 请刷新当前页面后重试');
+        setStatus('error', ['无法注入脚本, 请刷新当前页面后重试']);
         return;
       }
+      const p2 = await pingTab();
+      let fields = -1;
+      try {
+        const sc = await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_SCAN_COUNT' });
+        fields = sc ? sc.total : -1;
+      } catch (e) { /* ignore */ }
+      setStatus('ok', [
+        `注入完成: v${p2.v}${p2.v === mine ? ' (最新)' : ' (警告: 版本不符)'}`,
+        `扫描到字段: ${fields}`,
+        '正在发送填充命令, 请查看页面右下角...',
+      ]);
       // 分段填充: 收集勾选模块
       const all = $('allSections').checked;
       const sections = all ? [] : Array.from(document.querySelectorAll('#sectionsGrid input:checked')).map((c) => c.value);
       await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_FILL', sections });
-      showStatus('ok', '已触发填充, 结果将显示在页面右下角');
+      setStatus('ok', [
+        `注入完成: v${p2.v}`,
+        `扫描到字段: ${fields}`,
+        '填充命令已发送 ✓ 请查看页面右下角的提示',
+      ]);
     } catch (e) {
-      showStatus('error', '填充失败: ' + (e.message || e) + ' — 请刷新页面后重试');
+      setStatus('error', ['填充失败: ' + (e.message || e), '— 请刷新页面后重试']);
     } finally {
       $('fillBtn').disabled = false;
       $('fillBtn').textContent = '⚡ 一键填充当前表单';
