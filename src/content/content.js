@@ -620,6 +620,23 @@
     return items;
   }
 
+  // ---------- 捕获表单格式(空字段): 标签/类型/选项 → 信息库自定义字段 ----------
+  async function collectEmptyFormat() {
+    try {
+      const profile = await AS.storage.getActiveProfile();
+      if (!profile) { AS.overlay.toast('信息库为空, 请先在配置页创建方案'); return; }
+      const rule = await AS.storage.getSiteRuleForHost(location.hostname);
+      const items = await AS.capture.collectEmptyFields(profile, { rule });
+      if (!items.length) { AS.overlay.toast('没有可捕获的空字段格式(均已识别或已有值)', 'info'); return; }
+      const r = await AS.learnSave.save(profile, items, { sourceHost: location.hostname });
+      AS.overlay.toast(`🧩 已捕获 ${items.length} 个表单格式到信息库(自定义字段, 可去信息库填写)`, 'success', 4000);
+      chrome.runtime.sendMessage({ type: 'AF_LEARN_SAVE_RESULT', payload: r }).catch(() => {});
+    } catch (e) {
+      LOG().warn('content', 'collect empty format failed', e);
+      AS.overlay.toast('捕获失败: ' + (e && e.message || e), 'error');
+    }
+  }
+
   // ---------- 右键选中文字存入题库 ----------
   async function saveSelectionToQuiz(text) {
     const promptText = text.length > 60 ? text.slice(0, 60) + '...' : text;
@@ -855,6 +872,12 @@
           const fn = window.__af_preview_confirm;
           window.__af_preview_confirm = null;
           fn(null);
+        }
+        break;
+      case 'AF_LEARN_COLLECT_FORMAT':
+        // 捕获表单格式: 空字段的标签/类型/选项 → 信息库自定义字段(有空再填)
+        if (isCurrent() && window.top === window) {
+          collectEmptyFormat();
         }
         break;
       case 'AF_LEARN_COLLECT':

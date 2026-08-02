@@ -242,6 +242,57 @@
     return items;
   }
 
+  // 空字段格式捕获: 扫描页面为空的表单字段, 提取 标签/类型/选项 收录为自定义字段
+  // 与「已填值捕获」并存: 已填捕获识别填写好的内容; 格式捕获把空字段的"格式"记入信息库, 有空再填
+  async function collectEmptyFields(profile, opts) {
+    const o = opts || {};
+    const FZ = AS.fuzzy;
+    const fields = AS.scanner.scan();
+    const customs = (profile && profile.data && Array.isArray(profile.data.custom)) ? profile.data.custom : [];
+    const items = [];
+    const seen = new Set();
+    const IGNORE_LABELS = /^(请选择|选择|请填入|请填写|请输入|姓名|手机号|邮箱|性别|出生日期|毕业院校)$/;
+
+    for (const field of fields) {
+      try {
+        const el = field.el;
+        // 有值字段 → 交给已填捕获, 格式捕获只收空字段
+        const v = getValue(field);
+        if (v && String(v).trim()) continue;
+        const ctx = AS.matcher.buildContext(el);
+        if (!ctx.visible || ctx.readonly) continue;
+        // 开放题不收录格式
+        if (AS.matcher.isOpenQuestionField(ctx)) continue;
+        // 已能匹配库字段 → 无需收录(库已有该格式)
+        const m = AS.matcher.matchForCapture(ctx, el, { memories: null, rule: o.rule, profile, aliases: null });
+        if (m) continue;
+        // 标签提取(去"请输入/请选择"前缀与星号)
+        const labelText = String(ctx.labelText || ctx.placeholder || ctx.prevText || '').replace(/\s+/g, ' ').trim();
+        const clean = labelText.replace(/^(请输入|请填写|请选择|请填入)/, '').replace(/\*+$/, '').trim().slice(0, 20);
+        if (!clean || clean.length < 2 || IGNORE_LABELS.test(clean)) continue;
+        const key = FZ.normalize(clean).slice(0, 20);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        // 库中已有同名自定义字段 → 跳过
+        if (customs.some((x) => x.key === key || (x.label && FZ.normalize(x.label) === FZ.normalize(clean)))) continue;
+        // 选项/类型
+        let options = [];
+        if (field.type === 'select' && Array.isArray(field.options)) {
+          options = field.options.filter((x) => x && x.text).map((x) => x.text);
+        } else if (field.type === 'radio' && Array.isArray(field.group)) {
+          options = field.group.map((g) => g.value).filter((x) => x);
+        }
+        items.push({
+          type: 'custom', fieldKey: 'custom.' + key, key,
+          pageValue: '', state: 'new', confidence: 50, level: 'format',
+          label: clean, options, ctype: field.type,
+          selector: genSelectorWithPath(el), module: detectModule(el), frame: 'top',
+        });
+      } catch (e) { /* ignore */ }
+    }
+    return items;
+  }
+
   // 三态判定: 一致 / 差异 / 新增
   function triState(profile, fieldKey, pageValue) {
     const vals = AS.matcher.resolveValues(profile, fieldKey);
@@ -260,7 +311,7 @@
       ignoreCache = null;
       return r;
     },
-    collect, triState,
+    collect, collectEmptyFields, triState,
     getValue, genSelectorWithPath, detectModule, rowGroupOf,
   };
 })();

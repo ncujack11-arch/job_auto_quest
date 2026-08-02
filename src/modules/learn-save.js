@@ -90,6 +90,13 @@
         d.custom = d.custom || [];
         const exist = d.custom.find((c) => c.key === it.key);
         if (exist) {
+          // 格式捕获(空值)不覆盖已有值, 仅补全格式信息
+          if (it.level === 'format' && !String(it.pageValue).trim()) {
+            if (it.options && it.options.length) exist.options = it.options;
+            if (it.ctype) exist.ctype = it.ctype;
+            same++;
+            continue;
+          }
           if (String(exist.value) !== String(it.pageValue).trim()) {
             exist.value = String(it.pageValue).trim();
             exist.label = exist.label || it.label;
@@ -99,7 +106,11 @@
             updated++;
           } else same++;
         } else {
-          d.custom.push({ key: it.key || 'f' + Date.now().toString(36), label: it.label || '自定义', value: String(it.pageValue).trim(), _sourceDomain: sourceHost, _capturedAt: Date.now(), _confidence: it.confidence });
+          const entry = { key: it.key || 'f' + Date.now().toString(36), label: it.label || '自定义', value: String(it.pageValue).trim(), _sourceDomain: sourceHost, _capturedAt: Date.now(), _confidence: it.confidence };
+          if (it.options && it.options.length) entry.options = it.options;
+          if (it.ctype) entry.ctype = it.ctype;
+          if (it.level === 'format') entry._pending = true;  // 格式捕获: 待填写标记
+          d.custom.push(entry);
           added++;
         }
         saved++;

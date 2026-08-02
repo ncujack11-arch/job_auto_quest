@@ -258,6 +258,17 @@
   // ---------- 设置 ----------
   async function getSettings() {
     const s = await get(KEYS.SETTINGS, null);
+    let migrated = false;
+    if (s && typeof s === 'object') {
+      // 迁移: v1.12.10 及之前 previewMode 默认开启, 导致填充卡在预览等待;
+      // v1.12.11 起默认关闭(一键直达) — 无条件跟随新默认, 需要预览可在设置页重新开启
+      if (s.previewMode === true) {
+        s.previewMode = false;
+        s.__v = '1.12.11';
+        migrated = true;
+      }
+    }
+    if (migrated) await set(KEYS.SETTINGS, s);
     return Object.assign({}, DEFAULT_SETTINGS, s || {});
   }
   async function saveSettings(partial) {
