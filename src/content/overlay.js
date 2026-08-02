@@ -110,7 +110,7 @@
           h('div', { class: 'af-actions' }, [
             h('button', { class: 'af-btn ghost', text: '手动映射未匹配字段', onclick: () => {
               const u = new URL(chrome.runtime.getURL('src/options/options.html'));
-              u.hash = '#/rules?focus=mapping';
+              u.hash = '#/rules?focus=mapping&host=' + encodeURIComponent(location.hostname);
               window.open(u.toString(), '_blank');
             } }),
           ]),
