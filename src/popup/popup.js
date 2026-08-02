@@ -148,6 +148,13 @@
         showStatus('error', '无法在此页面捕获');
       }
     });
+    $('floatBtn').addEventListener('click', async () => {
+      if (!currentTab) return;
+      const ok = await ensureContentScript();
+      if (!ok) { showStatus('error', '无法注入脚本, 请刷新页面'); return; }
+      await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_SHOW_FLOAT' }).catch(() => {});
+      window.close();
+    });
     $('manualRecord').addEventListener('click', async () => {
       if (!currentTab) return;
       try {

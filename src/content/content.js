@@ -265,13 +265,17 @@
   }
 
   // ---------- 多页表单: 查找"下一步"按钮(排除提交类) ----------
+  // 支持 button/a/input/div/span/role=button(MOKA 等自研系统的分步按钮常为 div)
   function findNextButton() {
     try {
-      const els = document.querySelectorAll('button, a, input[type="button"], input[type="submit"]');
+      const els = document.querySelectorAll('button, a, input[type="button"], input[type="submit"], [role="button"], div, span');
       for (const el of els) {
         const t = ((el.textContent || el.value || '')).trim();
         if (!t || t.length > 14) continue;
         if (/^(下一步|保存并下一步|保存并继续|下一页|继续填写|继续|下一部分|下一页继续)/.test(t) && !/提交|完成|报名|确认|投递|最后/.test(t)) {
+          // div/span 需要是类按钮形态(点击区域), 避免误点长文本容器
+          const tag = el.tagName.toLowerCase();
+          if ((tag === 'div' || tag === 'span') && el.children.length > 1) continue;
           const rect = el.getBoundingClientRect();
           if (rect.width > 0 && rect.height > 0) return el;
         }
@@ -803,7 +807,7 @@
           if (items.length) {
             chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT_RESULT', items }).catch((e) => LOG().warn('content', 'learn result send failed', e));
           }
-        });
+        }).catch((e) => LOG().warn('content', 'learn collect failed', e));
         break;
       case 'AF_LEARN_SHOW':
         if (window.top === window && msg.items && msg.items.length) {
