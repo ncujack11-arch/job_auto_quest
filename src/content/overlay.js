@@ -129,10 +129,11 @@
       head('填充预览', h('button', { class: 'af-close', text: '×', onclick: () => { closePanel(); onCancel && onCancel(); } })),
       h('div', { class: 'af-body' }, [
         h('p', { style: 'font-size:12px;color:#6b7280;margin-bottom:8px', text: `共 ${items.length} 个字段将填入以下内容, 取消勾选可跳过个别字段。` }),
+        h('div', { style: 'background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:8px', text: '⚠ 点击下方「确认填充」按钮后才会真正写入表单!' }),
         h('div', { class: 'af-list', style: 'max-height:300px' }, rows),
         h('div', { class: 'af-actions' }, [
           h('button', { class: 'af-btn ghost', text: '取消', onclick: () => { closePanel(); onCancel && onCancel(); } }),
-          h('button', { class: 'af-btn primary', text: `确认填充 (${items.length})`, onclick: () => { closePanel(); onConfirm && onConfirm(selected); } }),
+          h('button', { class: 'af-btn primary', text: `✔ 确认填充 (${items.length})`, onclick: () => { closePanel(); onConfirm && onConfirm(selected); } }),
         ]),
       ]),
     ]));
