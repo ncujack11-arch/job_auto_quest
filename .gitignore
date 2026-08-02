@@ -17,3 +17,4 @@ dist/
 # Local logs
 *.log
 .e2e-profile/
+reports/
