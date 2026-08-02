@@ -710,6 +710,19 @@
     } catch (e) { return false; }
   }
 
+  // ---------- 全局错误守卫: 插件内部错误不阻塞页面、不污染页面控制台 ----------
+  // (隔离世界内注册, 只捕获插件自身错误, 不影响页面主世界)
+  window.addEventListener('error', (e) => {
+    try {
+      const msg = (e && e.message) ? String(e.message) : 'unknown error';
+      const src = (e && e.filename) ? String(e.filename) : '';
+      if (/^chrome-extension:\/\//.test(src) || /autofill|AF:/.test(msg)) {
+        LOG().warn('guard', 'extension error captured', msg.slice(0, 200));
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+      }
+    } catch (err) { /* 守卫自身异常忽略 */ }
+  }, true);
+
   // ---------- 网申避坑提示(每会话一次) ----------
   let tipsShown = false;
   async function showSiteTips() {

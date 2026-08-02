@@ -423,7 +423,7 @@
     lockItem.appendChild(UI().el('label', { text: '闲置自动锁定(5 分钟无操作自动清除会话密钥, 保护敏感字段)' }));
     const lWrap = UI().el('div', { style: 'display:flex;gap:8px;align-items:center' });
     const lCheck = UI().el('input', {
-      type: 'checkbox', checked: settings.autoLock !== false,
+      type: 'checkbox', id: 'autoLockChk', checked: settings.autoLock !== false,
       onchange: async (e) => {
         settings.autoLock = e.target.checked;
         await AS.storage.saveSettings(settings);
@@ -742,6 +742,11 @@
     renderAbout(c5);
 
     container.appendChild(c1);
+    container.appendChild(cFilter);
+    container.appendChild(cMem);
+    container.appendChild(cFlow);
+    container.appendChild(cAdv);
+    container.appendChild(cTips);
     container.appendChild(c2);
     container.appendChild(c3);
     container.appendChild(c4);
