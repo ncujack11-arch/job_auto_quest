@@ -2,6 +2,15 @@
 
 本项目严格遵循 [Conventional Commits](https://www.conventionalcommits.org/) 与语义化版本控制, 每个稳定版本打 Git tag。
 
+## [v1.9.2] - 2026-08-02 — 填充体验修复
+
+### 修复
+- fix: 多 frame/SPA 页面(如 MOKA)一键填充报「A listener indicated an asynchronous response...」— 内容脚本消息路由无条件 `return true` 导致即发即弃消息长期占用消息通道, 帧销毁时通道关闭; 现仅同步响应的消息 sendResponse
+
+### 新增
+- feat: 填充进度实时反馈 — 字段较多时显示进度条面板(已填 X/Y)
+- feat: 未匹配字段点击定位 — 结果面板点击未匹配项自动滚动到页面字段并红框高亮
+
 ## [v1.9.1] - 2026-08-02 — 自研系统适配与测试体系
 
 ### 修复
