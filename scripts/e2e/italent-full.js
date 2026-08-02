@@ -173,7 +173,32 @@ function report(name, ok, detail) {
   });
   report('阶段5b 出生日期面板选择', birthCheck.ok, birthCheck);
 
+  // ===== 阶段5c: 下拉窗口选择(打开+匹配逻辑验证; 未登录态 MOKA 拦截值写入) =====
+  const panelCheck = await page.evaluate(async () => {
+    const out = { opened: false, matched: false, valueWritten: false };
+    // 移除登录引导弹层(未登录测试环境限制)
+    const portal = document.querySelector('[class*="sd-Modal-portal"]');
+    if (portal) portal.remove();
+    const inp = Array.from(document.querySelectorAll('input')).find((i) => (i.placeholder || '') === '请选择');
+    if (!inp) return out;
+    inp.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    inp.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await new Promise((r2) => setTimeout(r2, 1200));
+    const panel = Array.from(document.querySelectorAll('[class*="Dropdown-dropdown"]')).find((p) => { const rc = p.getBoundingClientRect(); return rc.width > 0 && rc.height > 0; });
+    if (!panel) return out;
+    out.opened = true;
+    // 用生产函数匹配并点击选项(未登录态可能被系统拦截写入)
+    const r = await AS.filler.fillField({ el: inp, type: 'text', readonlyComponent: false }, '男', { conflictMode: 'skip', typing: false, photoDataUrl: '' });
+    out.matched = r.ok && r.action === 'filled';
+    out.valueWritten = !!inp.value;
+    out.detail = r.detail;
+    return out;
+  }, 90000);
+  report('阶段5c 下拉窗口选择(打开+匹配)', panelCheck.opened && panelCheck.matched, panelCheck);
   // ===== 阶段6: 弹层清理检查("暂无选项"提示层为非交互提示, 不阻塞) =====
+  // 模拟用户点击页面空白处关闭选择完成后的残留面板
+  await page.mouse.click(1300, 250);
+  await page.waitForTimeout(500);
   const leftover = await page.evaluate(() => {
     const out = [];
     document.querySelectorAll('[class*="Dropdown-dropdown"]').forEach((p) => {

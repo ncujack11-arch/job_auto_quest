@@ -189,6 +189,54 @@
     return { value, truncated: false };
   }
 
+  // 下拉窗口选择: 打开选项层(点击触发), 轮询等待选项, 模糊匹配目标值后点击
+  // 支持 MOKA(sd-Select-common-item) / ElementUI / AntD / role=option 等
+  async function fillPanelSelect(el, value) {
+    const target = String(value || '');
+    if (!target) return false;
+    try {
+      // 1. 打开选项层
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await sleep(500);
+      // 2. 轮询: 可见层内匹配选项
+      for (let i = 0; i < 10; i++) {
+        let panel = null;
+        document.querySelectorAll('[class*="Dropdown-dropdown"],[class*="select-dropdown"],[class*="picker-dropdown"],[class*="dropdown-menu"]').forEach((p) => {
+          if (panel) return;
+          const r = p.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) panel = p;
+        });
+        if (panel) {
+          let hit = null, bestScore = 0;
+          const items = panel.querySelectorAll('[class*="common-item"],[class*="option"],[role="option"],[class*="menu-item"],[class*="item"]');
+          items.forEach((it) => {
+            if (it.children.length > 4) return;
+            const t = (it.textContent || '').replace(/\s+/g, ' ').trim();
+            if (!t || t.length > 30) return;
+            const r2 = FUZZY().closest(target, [t], { minScore: 0.7, aliases: VALUE_ALIASES[target] ? { [target]: VALUE_ALIASES[target] } : undefined });
+            if (r2 && r2.score > bestScore) { bestScore = r2.score; hit = it; }
+          });
+          if (hit) {
+            hit.scrollIntoView({ block: 'center' });
+            await sleep(80);
+            hit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+            hit.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+            hit.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await sleep(250);
+            return true;
+          }
+          // 层出现但无匹配(如"暂无选项"): 停止轮询
+          if (/暂无|没有找到|无数据/.test(panel.textContent || '')) break;
+        }
+        await sleep(300);
+      }
+      dismissOverlays();
+      return false;
+    } catch (e) { return false; }
+  }
+
   // 关闭残留弹层(Escape 键 + 失焦), 避免遮挡页面
   function dismissOverlays() {
     try {
@@ -205,10 +253,23 @@
     // 尝试输入
     const input = root.querySelector ? root.querySelector('input:not([type="hidden"]),textarea') : null;
     if (input) {
-      setNativeValue(input, String(value));
-      input.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      await sleep(120);
+      if (input.readOnly) {
+        // 只读输入框: 打开下拉窗口从选项中选择
+        const okP = await fillPanelSelect(input, String(value));
+        if (okP) return true;
+      } else {
+        setNativeValue(input, String(value));
+        input.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await sleep(150);
+        // 输入未生效(受控组件拦截) → 打开下拉窗口选择
+        if (String(input.value) !== String(value)) {
+          const okP = await fillPanelSelect(input, String(value));
+          if (okP) return true;
+          dismissOverlays();
+          return true;
+        }
+      }
       // 搜索式下拉(学校/专业/城市): 输入后异步出结果, 轮询等待匹配项
       let best = null, bestScore = 0;
       for (let i = 0; i < 8 && !best; i++) {
@@ -389,6 +450,9 @@
                 if (ok) return { ok: true, action: 'filled', detail: '日期面板选择完成' };
               }
             }
+            // 其他只读下拉: 打开下拉窗口选择
+            const okP = await fillPanelSelect(el, String(value));
+            if (okP) return { ok: true, action: 'filled', detail: '下拉选项选择完成' };
             const ok = await fillCustom(el, el, value);
             if (ok) return { ok: true, action: 'filled', detail: '组件选择完成' };
             // 兜底: 直接写值并触发事件(部分框架可接受)
@@ -402,6 +466,11 @@
           // 验证码字段绝不填充
           if (/(验证码|图形码|校验码|captcha|verify)/i.test(((el.placeholder || '') + ' ' + (el.name || '') + ' ' + (el.className || '')).replace(/(滑块|滑动)/g, ''))) {
             return { ok: false, action: 'info', detail: '验证码字段, 请手动填写' };
+          }
+          // 下拉选择型(placeholder=请选择 等): 打开下拉窗口从选项中选择
+          if (/^请选择/.test(String(el.placeholder || '').trim())) {
+            const okP = await fillPanelSelect(el, String(value));
+            if (okP) return { ok: true, action: 'filled', detail: '下拉选项选择完成' };
           }
           let target = String(value || '');
           const fmt = adaptPhoneFormat(el, target);
