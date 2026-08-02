@@ -134,9 +134,121 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 3000);
   }
 
+  // ---------- 批量导入 ----------
+  const CSV_HEADERS = {
+    '公司名称': 'company', '公司': 'company', '企业': 'company',
+    '岗位名称': 'position', '岗位': 'position', '职位': 'position',
+    '岗位类别': 'category', '类别': 'category',
+    '工作城市': 'city', '城市': 'city', '地点': 'city',
+    '投递渠道': 'channel', '渠道': 'channel', '来源': 'channel',
+    '状态': 'status', '进度': 'status',
+    '优先级': 'priority',
+    '标签': 'tags', '备注标签': 'tags',
+    '投递时间': 'appliedAt', '投递日期': 'appliedAt', '申请时间': 'appliedAt', '时间': 'appliedAt',
+    '岗位链接': 'url', '链接': 'url', 'URL': 'url', 'url': 'url',
+    '薪资': 'salary', '薪资待遇': 'salary', '薪酬': 'salary',
+    'base地点': 'base', 'base': 'base',
+    '联系人': 'contact', 'HR': 'contact',
+    '备注': 'note', '说明': 'note', '备注内容': 'note',
+    'JD': 'jdSnapshot', 'JD快照': 'jdSnapshot', '职位描述': 'jdSnapshot',
+    '公司行业': 'industry', '行业': 'industry',
+  };
+
+  function parseCSV(text) {
+    const rows = [];
+    let row = [], field = '', inQ = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQ) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else inQ = false;
+        } else field += c;
+      } else if (c === '"') {
+        inQ = true;
+      } else if (c === ',') {
+        row.push(field); field = '';
+      } else if (c === '\n' || c === '\r') {
+        if (c === '\r' && text[i + 1] === '\n') i++;
+        row.push(field); field = '';
+        if (row.some((x) => x && x.trim())) rows.push(row);
+        row = [];
+      } else field += c;
+    }
+    if (field !== '' || row.length) { row.push(field); if (row.some((x) => x && x.trim())) rows.push(row); }
+    return rows;
+  }
+
+  function parseTs(s) {
+    if (!s) return null;
+    const t = String(s).trim().replace(/[./]/g, '-');
+    const m = t.match(/(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{1,2}))?/);
+    if (m) {
+      const d = new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0));
+      return isNaN(d.getTime()) ? null : d.getTime();
+    }
+    const m2 = t.match(/^(\d{4})-(\d{1,2})$/);
+    if (m2) { const d = new Date(+m2[1], +m2[2] - 1, 1); return isNaN(d.getTime()) ? null : d.getTime(); }
+    return null;
+  }
+
+  // 导入 CSV / JSON 文本 → { records: 待导入记录[], errors: [] }
+  function importRecords(text, { format }) {
+    const records = [];
+    const errors = [];
+    const applyField = (rec, key, value) => {
+      const v = value === null || value === undefined ? '' : String(value).trim();
+      if (!v) return;
+      const mapped = CSV_HEADERS[key] || key;
+      if (mapped === 'tags') {
+        rec.tags = [...new Set([...(rec.tags || []), ...v.split(/[,，、|]/).map((t) => t.trim()).filter(Boolean)])];
+      } else if (mapped === 'appliedAt') {
+        const ts = parseTs(v);
+        if (ts) {
+          rec.timeline = rec.timeline || [];
+          const existing = rec.timeline.find((e) => e.type === '投递');
+          if (existing) existing.time = ts;
+          else rec.timeline.unshift({ id: uid(), type: '投递', time: ts, note: '投递(批量导入)' });
+        }
+      } else if (mapped === 'note') {
+        rec.notes = rec.notes || {};
+        rec.notes.content = v;
+      } else if (mapped in rec) {
+        rec[mapped] = v;
+      }
+    };
+
+    if (format === 'csv') {
+      const rows = parseCSV(text);
+      if (rows.length < 2) { errors.push('CSV 无数据行(需要表头 + 至少一行数据)'); return { records, errors }; }
+      const header = rows[0].map((h) => h.trim().replace(/^\uFEFF/, ''));
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row.some((c) => c && c.trim())) continue;
+        const rec = newRecord();
+        header.forEach((h, idx) => applyField(rec, h, row[idx]));
+        if (rec.company || rec.position) records.push(rec);
+        else errors.push(`第 ${i + 1} 行缺少公司/岗位, 已跳过`);
+      }
+    } else {
+      let data = text;
+      try { data = JSON.parse(text); } catch (e) { errors.push('JSON 解析失败: ' + e.message); return { records, errors }; }
+      const list = Array.isArray(data) ? data : (data && Array.isArray(data.records) ? data.records : null);
+      if (!list) { errors.push('JSON 需为数组或 { records: [...] } 结构'); return { records, errors }; }
+      list.forEach((item, i) => {
+        if (!item || typeof item !== 'object') { errors.push(`第 ${i + 1} 条不是对象, 已跳过`); return; }
+        const rec = newRecord();
+        Object.entries(item).forEach(([k, v]) => applyField(rec, k, v));
+        if (rec.company || rec.position) records.push(rec);
+        else errors.push(`第 ${i + 1} 条缺少公司/岗位, 已跳过`);
+      });
+    }
+    return { records, errors };
+  }
+
   AS.apps = {
     DEFAULT_STATUS, EVENT_TYPES, PRIORITIES, uid,
     newRecord, createRecord, setStatus, addEvent, removeEvent, milestones,
-    fromGrab, toCSV, downloadCSV,
+    fromGrab, toCSV, downloadCSV, importRecords,
   };
 })();

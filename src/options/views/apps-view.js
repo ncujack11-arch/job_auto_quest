@@ -89,6 +89,7 @@
     bar.appendChild(tagSel);
 
     bar.appendChild(UI().el('button', { class: 'btn primary', text: '＋ 新增投递', onclick: () => openDetail(null) }));
+    bar.appendChild(UI().el('button', { class: 'btn', text: '📥 批量导入', onclick: () => openImport() }));
     bar.appendChild(UI().el('button', {
       class: 'btn', text: '📤 导出 CSV', onclick: () => {
         const list = selected.size ? records.filter((r) => selected.has(r.id)) : filtered();
@@ -97,6 +98,92 @@
       },
     }));
     return bar;
+  }
+
+  // ---------- 批量导入 ----------
+  function openImport() {
+    const modal = UI().el('div', { class: 'modal-mask' }, [UI().el('div', { class: 'modal' }, [])]);
+    const box = modal.querySelector('.modal');
+    box.appendChild(UI().el('h2', { text: '批量导入投递记录' }));
+    box.appendChild(UI().el('p', { class: 'view-sub', style: 'margin-bottom:12px', text: '支持 CSV(与「导出 CSV」格式一致)或 JSON(数组 / { records: [...] })。表头支持中文: 公司名称, 岗位名称, 岗位类别, 工作城市, 投递渠道, 状态, 优先级, 标签, 投递时间, 岗位链接, 薪资, base地点, 联系人, 备注。' }));
+
+    const fileInput = UI().el('input', { type: 'file', accept: '.csv,.json', style: 'display:none' });
+    const statusEl = UI().el('div', { class: 'empty', style: 'padding:24px', text: '请选择文件' });
+    const previewEl = UI().el('div', {});
+
+    fileInput.addEventListener('change', async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      statusEl.textContent = '解析中...';
+      previewEl.innerHTML = '';
+      try {
+        const text = await f.text();
+        const format = f.name.toLowerCase().endsWith('.json') ? 'json' : 'csv';
+        const { records: list, errors } = AS.apps.importRecords(text, { format });
+        if (!list.length) {
+          statusEl.className = 'empty';
+          statusEl.innerHTML = '';
+          statusEl.appendChild(UI().el('b', { text: '未解析到有效记录' }));
+          statusEl.appendChild(UI().el('span', { text: errors.join('; ') || '请检查文件格式' }));
+          return;
+        }
+        statusEl.className = '';
+        statusEl.textContent = `共解析 ${list.length} 条记录${errors.length ? ', ' + errors.length + ' 条跳过' : ''}`;
+        previewEl.innerHTML = '';
+        previewEl.appendChild(UI().el('div', { class: 'table-wrap', style: 'max-height:260px;overflow-y:auto' }, [renderImportPreview(list)]));
+        box.dataset.records = JSON.stringify(list);
+        if (errors.length) {
+          previewEl.appendChild(UI().el('div', { style: 'color:#b45309;font-size:12px;margin-top:8px', text: errors.slice(0, 8).join('\n') }));
+        }
+      } catch (err) {
+        statusEl.innerHTML = '';
+        statusEl.appendChild(UI().el('b', { text: '解析失败' }));
+        statusEl.appendChild(UI().el('span', { text: err.message }));
+      }
+    });
+
+    box.appendChild(UI().el('div', { class: 'toolbar' }, [
+      UI().el('button', { class: 'btn primary', text: '选择 CSV / JSON 文件', onclick: () => fileInput.click() }),
+    ]));
+    box.appendChild(fileInput);
+    box.appendChild(statusEl);
+    box.appendChild(previewEl);
+    box.appendChild(UI().el('div', { class: 'modal-foot' }, [
+      UI().el('button', { class: 'btn', text: '取消', onclick: () => modal.remove() }),
+      UI().el('button', {
+        class: 'btn primary', text: '确认导入全部', onclick: async () => {
+          const list = box.dataset.records ? JSON.parse(box.dataset.records) : [];
+          if (!list.length) return UI().toast('没有可导入的记录', 'error');
+          if (!confirm(`确认导入 ${list.length} 条记录?`)) return;
+          for (const rec of list) await AS.storage.upsertApplication(rec);
+          modal.remove();
+          UI().toast(`已导入 ${list.length} 条`, 'success');
+          await reload(); renderAll();
+        },
+      }),
+    ]));
+    document.body.appendChild(modal);
+  }
+
+  function renderImportPreview(list) {
+    const table = UI().el('table', { class: 'list' });
+    table.appendChild(UI().el('thead', {}, [UI().el('tr', {}, [
+      UI().el('th', { text: '公司' }), UI().el('th', { text: '岗位' }),
+      UI().el('th', { text: '类别' }), UI().el('th', { text: '城市' }),
+      UI().el('th', { text: '渠道' }), UI().el('th', { text: '状态' }), UI().el('th', { text: '投递时间' }),
+    ])]));
+    const tbody = UI().el('tbody');
+    list.slice(0, 20).forEach((r) => {
+      const t = (r.timeline || []).find((e) => e.type === '投递');
+      tbody.appendChild(UI().el('tr', {}, [
+        UI().el('td', { text: r.company }), UI().el('td', { text: r.position }),
+        UI().el('td', { text: r.category || '-' }), UI().el('td', { text: r.city || '-' }),
+        UI().el('td', { text: r.channel || '-' }), UI().el('td', { text: r.status }),
+        UI().el('td', { text: t ? fmtTime(t.time) : '-' }),
+      ]));
+    });
+    table.appendChild(tbody);
+    return table;
   }
 
   function renderBatchBar() {
