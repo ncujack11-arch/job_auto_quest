@@ -414,6 +414,9 @@
 
     const scannedFields = AS.scanner.scan();
     report.total = scannedFields.length;
+    if (window.top === window && scannedFields.length > 0) {
+      AS.overlay.toast(`🔍 扫描到 ${scannedFields.length} 个表单字段, 正在匹配...`, 3000);
+    }
     let plan = buildPlan(scannedFields, profile, rule, memories, reuseActive, sections, valueQueues, expOrder || null, settings.refCodes);
     plan.items.forEach((it) => seenFields.add(it.field.el));
     // 未匹配字段计入报告(供结果面板展示与点击定位)
@@ -430,6 +433,9 @@
       }
       chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }).catch(() => {});
       return;
+    }
+    if (window.top === window) {
+      AS.overlay.toast(`🎯 匹配到 ${plan.items.length} 个字段, 开始写入...`, 3000);
     }
 
     const finish = async (snapshots, unmatchedEls, withPanel) => {
@@ -839,70 +845,79 @@
   // 注意: 内容脚本的所有响应均为同步 sendResponse, 即发即弃消息(AF_FILL 等)不返回 true,
   // 否则多 frame 页面每个 frame 都保持消息通道, SPA 切换/iframe 销毁时触发
   // "message channel closed before a response was received"
+  const CURRENT_VERSION = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : '';
+  // 旧版本脚本的监听器仍在时, 由版本守卫确保仅当前版本处理消息
+  const isCurrent = () => !CURRENT_VERSION || AS.__v === CURRENT_VERSION;
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || typeof msg !== 'object') return;
     LOG().debug('content', 'msg received', msg.type);
     switch (msg.type) {
       case 'AF_FILL':
-        doFill(msg);
+        if (isCurrent()) doFill(msg);
         break;
       case 'AF_GRAB_INFO':
-        sendResponse(grabPageInfo());
+        if (isCurrent()) sendResponse(grabPageInfo());
         break;
       case 'AF_SHOW_RECORD':
-        if (window.top === window) {
+        if (isCurrent() && window.top === window) {
           setTimeout(() => AS.overlay.showRecordPanel(msg.info || {}), 200);
         }
         break;
       case 'AF_SHOW_FLOAT':
-        if (window.top === window) {
+        if (isCurrent() && window.top === window) {
           AS.overlay.ensureFloatBall();
           AS.overlay.toast('悬浮操作面板已显示 (可拖拽)');
         }
         break;
       case 'AF_ENABLE_MARK_MODE':
-        if (window.top === window) enableMarkMode();
+        if (isCurrent() && window.top === window) enableMarkMode();
         break;
       case 'AF_SAVE_SELECTION':
-        if (window.top === window && msg.text && msg.text.trim()) {
+        if (isCurrent() && window.top === window && msg.text && msg.text.trim()) {
           saveSelectionToQuiz(msg.text.trim());
         }
         break;
       case 'AF_QUIZ_LOOKUP':
-        if (window.top === window && msg.text && msg.text.trim()) {
+        if (isCurrent() && window.top === window && msg.text && msg.text.trim()) {
           lookupQuizAnswer(msg.text.trim());
         }
         break;
       case 'AF_SCAN_COUNT': {
-        const fields = AS.scanner.scan();
-        sendResponse({ total: fields.length, hostname: location.hostname });
+        if (isCurrent()) {
+          const fields = AS.scanner.scan();
+          sendResponse({ total: fields.length, hostname: location.hostname });
+        }
         break;
       }
       case 'AF_PING':
-        sendResponse({ pong: true });
+        sendResponse({ pong: true, v: AS.__v || '' });
         break;
       case 'AF_LEARN_COLLECT':
-        collectManualInputs().then((items) => {
-          if (items.length) {
-            chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT_RESULT', items }).catch((e) => LOG().warn('content', 'learn result send failed', e));
-          }
-        }).catch((e) => LOG().warn('content', 'learn collect failed', e));
+        if (isCurrent()) {
+          collectManualInputs().then((items) => {
+            if (items.length) {
+              chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT_RESULT', items }).catch((e) => LOG().warn('content', 'learn result send failed', e));
+            }
+          }).catch((e) => LOG().warn('content', 'learn collect failed', e));
+        }
         break;
       case 'AF_LEARN_SHOW':
-        if (window.top === window && msg.items && msg.items.length) {
+        if (isCurrent() && window.top === window && msg.items && msg.items.length) {
           AS.overlay.showLearnPanel(msg.items);
         }
         break;
       case 'AF_FILL_SUMMARY':
-        if (window.top === window && msg.summary) {
+        if (isCurrent() && window.top === window && msg.summary) {
           AS.overlay.showSummary(msg.summary);
         }
         break;
       case 'AF_DIAGNOSTIC':
-        chrome.runtime.sendMessage({ type: 'AF_DIAG_RESULT', data: collectDiagnostic() }).catch(() => {});
+        if (isCurrent()) {
+          chrome.runtime.sendMessage({ type: 'AF_DIAG_RESULT', data: collectDiagnostic() }).catch(() => {});
+        }
         break;
       case 'AF_DIAG_SHOW':
-        if (window.top === window && msg.text) {
+        if (isCurrent() && window.top === window && msg.text) {
           AS.overlay.showDiagnostic(msg.text);
         }
         break;

@@ -64,7 +64,12 @@
 
   function start() {
     if (timer) return;
-    timer = setInterval(scanOnce, 6000);
+    const V = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : '';
+    timer = setInterval(() => {
+      // 版本自愈: 旧脚本残留时停止自身定时器
+      if (V && AS.__v && AS.__v !== V) { clearInterval(timer); timer = null; return; }
+      scanOnce();
+    }, 6000);
     setTimeout(scanOnce, 2500);
   }
   function stop() {

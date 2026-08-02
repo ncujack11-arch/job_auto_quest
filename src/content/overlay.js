@@ -68,7 +68,11 @@
 .af-fp-divider { border-top: 1px solid #f1f5f9; margin: 4px 0; }
 `;
 
+  // host 元素: 版本升级后旧 overlay 残留时先清理, 避免重复面板
+  const oldHost = document.querySelector('[data-af-host]');
+  if (oldHost) { try { oldHost.remove(); } catch (e) { /* ignore */ } }
   const host = document.createElement('div');
+  host.setAttribute('data-af-host', '1');
   host.style.cssText = 'all:initial;position:fixed;top:0;left:0;width:0;height:0;z-index:2147483647;';
   const shadow = host.attachShadow({ mode: 'open' });
   const style = document.createElement('style');

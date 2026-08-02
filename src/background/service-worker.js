@@ -180,24 +180,25 @@ function isHttpTab(tab) {
   return tab && /^https?:\/\//.test(tab.url || '');
 }
 
-// 探测内容脚本是否已注入; 未注入则用 scripting 兜底注入(注入所有 frame, 兼容 iframe 表单)
+// 探测内容脚本是否已注入; 未注入或版本不一致则用 scripting 兜底注入(注入所有 frame, 兼容 iframe 表单)
 // (popup 打开 / 右键菜单点击时 activeTab 已授权; 快捷键场景可能无权限, 返回 false)
 async function ensureInjected(tabId) {
   try {
-    await chrome.tabs.sendMessage(tabId, { type: 'AF_PING' });
-    return true;
+    const r = await chrome.tabs.sendMessage(tabId, { type: 'AF_PING' });
+    if (r && r.pong && r.v === chrome.runtime.getManifest().version) return true;
+    LOG.info('bg', 'content script version mismatch, re-injecting...', tabId);
   } catch (e) {
     LOG.info('bg', 'content script not injected, fallback injecting...', tabId);
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId, allFrames: true },
-        files: AS.storage.CORE_CONTENT_SCRIPTS,
-      });
-      return true;
-    } catch (e2) {
-      LOG.warn('bg', 'fallback injection failed', e2);
-      return false;
-    }
+  }
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: AS.storage.CORE_CONTENT_SCRIPTS,
+    });
+    return true;
+  } catch (e2) {
+    LOG.warn('bg', 'fallback injection failed', e2);
+    return false;
   }
 }
 

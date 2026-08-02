@@ -6,7 +6,18 @@
 (function () {
   'use strict';
   const G = (typeof window !== 'undefined') ? window : globalThis;
+  // 版本自愈: 扩展更新后, 残留的旧内容脚本会在注入新脚本时被识别并整体清除, 确保新代码完整初始化
+  let V = '';
+  try {
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest) {
+      V = chrome.runtime.getManifest().version;
+    }
+  } catch (e) { /* ignore */ }
+  if (G.AS && G.AS.__v && V && G.AS.__v !== V) {
+    try { delete G.AS; } catch (e) { G.AS = undefined; }
+  }
   const AS = (G.AS = G.AS || {});
+  if (V) AS.__v = V;
   if (AS.logger) return;
 
   const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };

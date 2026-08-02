@@ -87,7 +87,12 @@
     state.fillTime = Date.now();
     state.reported = false;
     hookHistory();
-    state.timer = setInterval(check, 2500);
+    const V = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : '';
+    state.timer = setInterval(() => {
+      // 版本自愈: 旧脚本残留时停止自身定时器
+      if (V && AS.__v && AS.__v !== V) { clearInterval(state.timer); state.timer = null; return; }
+      check();
+    }, 2500);
     // 8 分钟后自动停止监控
     setTimeout(disarm, 8 * 60 * 1000);
     LOG().debug('detect', 'submission watcher armed');

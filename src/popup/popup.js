@@ -75,20 +75,20 @@
   }
 
   // 本地确保内容脚本已注入(popup 打开时 activeTab 已授权, 不依赖后台消息通道)
+  // 版本不一致(旧脚本残留)时强制重新注入
   async function ensureContentScript() {
     try {
-      await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_PING' });
+      const r = await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_PING' });
+      if (r && r.pong && r.v === chrome.runtime.getManifest().version) return true;
+    } catch (e) { /* 未注入 */ }
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: currentTab.id, allFrames: true },
+        files: AS.storage.CORE_CONTENT_SCRIPTS,
+      });
       return true;
-    } catch (e) {
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: currentTab.id, allFrames: true },
-          files: AS.storage.CORE_CONTENT_SCRIPTS,
-        });
-        return true;
-      } catch (e2) {
-        return false;
-      }
+    } catch (e2) {
+      return false;
     }
   }
 
