@@ -14,6 +14,8 @@
     }
   } catch (e) { /* ignore */ }
   if (G.AS && G.AS.__v && V && G.AS.__v !== V) {
+    // 标记旧脚本失效: 旧 listener 的版本守卫(AS.__v === 旧版本)将判定失败, 不再处理任何消息
+    try { G.AS.__v = 'stale'; } catch (e) { /* ignore */ }
     try { delete G.AS; } catch (e) { G.AS = undefined; }
   }
   const AS = (G.AS = G.AS || {});

@@ -333,11 +333,11 @@
   }
 
   // ---------- 核心填充流程 ----------
-  // 防重复: 版本自愈后页面可能并存新旧两个 listener, 用锁保证单次执行
+  // 防重复: 同页面可能并存多个版本的 listener, 用版本化锁保证仅一个 doFill 执行
   function acquireFillLock() {
-    if (window.__af_fill_lock) return false;
-    window.__af_fill_lock = true;
-    setTimeout(() => { window.__af_fill_lock = false; }, 60000);
+    if (window.__af_fill_lock === CURRENT_VERSION) return false;
+    window.__af_fill_lock = CURRENT_VERSION;
+    setTimeout(() => { if (window.__af_fill_lock === CURRENT_VERSION) window.__af_fill_lock = ''; }, 60000);
     return true;
   }
   function withTimeout(promise, ms, label) {
