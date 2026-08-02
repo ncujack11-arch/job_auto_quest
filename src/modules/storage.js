@@ -22,7 +22,7 @@
   };
 
   const DEFAULT_SETTINGS = {
-    version: '1.9.2',
+    version: '1.9.3',
     activeProfileId: null,
     conflictMode: 'skip',        // 'skip' | 'overwrite'
     typingMode: false,           // 逐字模拟输入
