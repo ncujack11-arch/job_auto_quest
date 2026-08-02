@@ -1,0 +1,175 @@
+/**
+ * capture.js — 内容捕获引擎(深化版)
+ * 全控件取值(真实值+显示文本)、动态行分组、上下文/选择器/模块采集、智能过滤
+ */
+(function () {
+  'use strict';
+  const G = (typeof window !== 'undefined') ? window : globalThis;
+  const AS = (G.AS = G.AS || {});
+  if (AS.capture) return;
+
+  const LOG = () => AS.logger;
+  const FZ = () => AS.fuzzy;
+
+  // ---------- 取值: 双值(真实值 + 显示文本) ----------
+  function getValue(field) {
+    const el = field.el;
+    try {
+      switch (field.type) {
+        case 'checkbox': {
+          if (!el.checked) return { value: '', display: '' };
+          const label = (el.labels && el.labels[0] ? el.labels[0].textContent.trim() : '') || '';
+          return { value: '是', display: label || '是' };
+        }
+        case 'radio': {
+          const checked = (field.group || []).find((r) => r.checked);
+          if (!checked) return { value: '', display: '' };
+          const label = (checked.labels && checked.labels[0] ? checked.labels[0].textContent.trim() : '') || checked.value || '';
+          return { value: label || '是', display: label || '是' };
+        }
+        case 'select': {
+          const o = el.selectedOptions && el.selectedOptions[0];
+          if (!o) return { value: '', display: '' };
+          return { value: o.textContent || o.value || '', display: o.textContent || '' };
+        }
+        case 'textarea':
+        case 'text': {
+          return { value: el.value || '', display: el.value || '' };
+        }
+        case 'richtext': {
+          const t = (el.textContent || '').trim();
+          return { value: t, display: t };
+        }
+        case 'custom': {
+          const input = field.custom ? field.custom.querySelector('input:not([type="hidden"]),textarea') : null;
+          const v = input ? input.value : (el.value || '');
+          return { value: v || '', display: v || '' };
+        }
+        case 'date': {
+          const v = el.value || '';
+          return { value: v, display: v };
+        }
+        default:
+          return { value: el.value || '', display: el.value || '' };
+      }
+    } catch (e) {
+      return { value: '', display: '' };
+    }
+  }
+
+  // ---------- 选择器(带兜底路径) ----------
+  function genSelectorWithPath(el) {
+    const sel = AS.matcher.genSelector(el);
+    if (sel) return sel;
+    try {
+      // 生成 nth-child 路径
+      const parts = [];
+      let node = el;
+      while (node && node.nodeType === 1 && node !== document.documentElement) {
+        let part = node.tagName.toLowerCase();
+        const parent = node.parentElement;
+        if (parent) {
+          const siblings = Array.from(parent.children).filter((c) => c.tagName === node.tagName);
+          if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(node) + 1) + ')';
+        }
+        parts.unshift(part);
+        node = parent;
+        if (parts.length > 6) break;
+      }
+      return parts.join(' > ');
+    } catch (e) { return ''; }
+  }
+
+  // ---------- 模块区域识别 ----------
+  function detectModule(el) {
+    try {
+      let p = el.parentElement;
+      for (let i = 0; i < 6 && p; i++, p = p.parentElement) {
+        if (p.tagName === 'BODY' || p.tagName === 'HTML') break;
+        const cls = String((p.className || '').toString() || '').toLowerCase();
+        if (/(section|step|module|panel|form-section|block|group)/.test(cls)) {
+          // 区域标题: 容器内短文本(排除控件)
+          const texts = Array.from(p.querySelectorAll(':scope > div, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > label, :scope > span, :scope > p'))
+            .map((n) => (n.textContent || '').trim())
+            .filter((t) => t && t.length >= 2 && t.length <= 20 && !/input|select|textarea/i.test(t));
+          const title = texts.find((t) => /(信息|教育|实习|项目|技能|意向|经历|评价|证书|获奖|情况|背景)/.test(t)) || texts[0] || '';
+          if (title) return title.slice(0, 12);
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return '';
+  }
+
+  // ---------- 动态行分组: 重复行容器 ----------
+  const ROW_SELECTOR = '.form-row,.form-item-row,.entry,.list-item,.experience-item,.item,.row-item,.form-line,.apply-item,tr,[class*="form-item"],[class*="row-item"],[class*="list-item"],[class*="entry-item"]';
+  function rowGroupOf(el) {
+    try {
+      const row = el.closest && el.closest(ROW_SELECTOR);
+      if (!row) return 0;
+      // 行序号: 同级相同容器中的位置
+      const parent = row.parentElement;
+      if (!parent) return 0;
+      const siblings = Array.from(parent.children).filter((c) => c.matches ? c.matches(ROW_SELECTOR) || c.tagName === row.tagName : true);
+      return Math.max(0, siblings.indexOf(row));
+    } catch (e) { return 0; }
+  }
+
+  // ---------- 主捕获 ----------
+  // 返回 { captured: [item], errors: [] }
+  // item: { el, type, value, display, label, name, id, cls, placeholder, selector, module, rowGroup, frame, format }
+  async function captureAll() {
+    const items = [];
+    const errors = [];
+    let fields = [];
+    try { fields = AS.scanner.scan(); } catch (e) { errors.push('扫描失败: ' + (e.message || e)); }
+
+    for (const field of fields) {
+      const el = field.el;
+      // 上下文
+      let ctx = null;
+      try { ctx = AS.matcher.buildContext(el); } catch (e) { /* ignore */ }
+      const ctxText = ((ctx ? ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id : '') + ' ' + String((el.className || '').toString() || '')).toLowerCase();
+
+      // 智能过滤: 密码/空值/黑名单/文件
+      if (field.type === 'file') continue;
+      if (field.type === 'text' && (el.type || '').toLowerCase() === 'password') continue;
+      const v = getValue(field);
+      if (v.value === undefined || v.value === null || String(v.value).trim() === '') continue;
+      // 忽略黑名单(异步读取, 循环内 await 开销大 → 前置读取一次)
+      if (ignoreCache && ignoreCache.some((k) => ctxText.includes(k))) continue;
+
+      const selector = genSelectorWithPath(el);
+      items.push({
+        el,
+        type: field.type,
+        value: String(v.value).trim(),
+        display: String(v.display || '').trim(),
+        label: ctx ? (ctx.labelText || '') : '',
+        name: el.name || '',
+        id: el.id || '',
+        cls: String((el.className || '').toString() || '').slice(0, 80),
+        placeholder: el.placeholder || '',
+        selector,
+        module: detectModule(el),
+        rowGroup: rowGroupOf(el),
+        frame: (window.top === window ? 'top' : 'iframe'),
+        format: field.type === 'select' ? 'select' : (el.getAttribute ? el.getAttribute('data-type') || '' : ''),
+      });
+    }
+    return { captured: items, errors };
+  }
+  let ignoreCache = null;
+
+  AS.capture = {
+    captureAll: async () => {
+      try { ignoreCache = await AS.storage.getCaptureIgnore(); } catch (e) { ignoreCache = { keywords: [], exact: [] }; }
+      const builtin = (ignoreCache && ignoreCache.keywords) || [];
+      ignoreCache = (ignoreCache && ignoreCache.exact) ? builtin.concat(ignoreCache.exact) : builtin;
+      ignoreCache = ignoreCache.map((k) => String(k).toLowerCase());
+      const r = await captureAll();
+      ignoreCache = null;
+      return r;
+    },
+    getValue, genSelectorWithPath, detectModule, rowGroupOf,
+  };
+})();

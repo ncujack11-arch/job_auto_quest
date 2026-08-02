@@ -711,30 +711,18 @@
     };
   }
 
-  // ---------- 学习模式: 捕获页面手动填写内容 ----------
+  // ---------- 学习模式: 捕获页面已填内容(深化版) ----------
+  // 三级匹配 + 三态判定(一致/差异/新增) + 上下文采集
   function fieldValue(field) {
-    const el = field.el;
-    try {
-      switch (field.type) {
-        case 'checkbox': return el.checked ? '是' : '';
-        case 'radio': {
-          const checked = (field.group || []).find((r) => r.checked);
-          if (!checked) return '';
-          const label = checked.labels && checked.labels[0] ? checked.labels[0].textContent.trim() : '';
-          return label || checked.value || '是';
-        }
-        case 'select': {
-          const o = el.selectedOptions && el.selectedOptions[0];
-          return o ? (o.textContent || o.value || '') : '';
-        }
-        case 'richtext': return (el.textContent || '').trim();
-        case 'custom': {
-          const input = field.custom ? field.custom.querySelector('input:not([type="hidden"]),textarea') : null;
-          return input ? input.value : (el.value || '');
-        }
-        default: return el.value || '';
-      }
-    } catch (e) { return ''; }
+    const v = AS.capture.getValue(field);
+    return v ? v.value : '';
+  }
+
+  function triStateOf(profile, fieldKey, pageValue) {
+    const vals = AS.matcher.resolveValues(profile, fieldKey);
+    if (!vals.length) return 'new';
+    if (vals.includes(pageValue)) return 'same';
+    return 'diff';
   }
 
   async function collectManualInputs() {
@@ -748,58 +736,70 @@
       AS.overlay.toast('信息库为空, 请先在配置页创建方案');
       return [];
     }
-    const rule = await AS.storage.getSiteRuleForHost(location.hostname);
-    const fields = AS.scanner.scan();
+    const [rule, memories, aliases] = await Promise.all([
+      AS.storage.getSiteRuleForHost(location.hostname),
+      AS.storage.getMemoriesForHost(location.hostname),
+      AS.storage.getUserAliases(),
+    ]);
+    const { captured, errors } = await AS.capture.captureAll();
     const items = [];
     const seen = new Set();
-    for (const field of fields) {
-      const raw = fieldValue(field);
-      const value = raw === null || raw === undefined ? '' : String(raw).trim();
-      if (!value) continue;
-      const ctx = AS.matcher.buildContext(field.el);
 
-      // 开放题答案 → 题库(与库去重: 已存在相同 问题+答案 则不收集)
+    for (const c of captured) {
+      const ctx = AS.matcher.buildContext(c.el);
+
+      // 开放题答案 → 题库
       if (AS.matcher.isOpenQuestionField(ctx)) {
-        const question = (ctx.labelText || ctx.placeholder || ctx.name || '开放题').slice(0, 60);
-        const answer = value;
-        const inLibrary = (profile.data.openQuestions || []).some((q) => q.question === question && q.answer === answer);
-        const dupKey = 'oq|' + question + '|' + value;
-        if (!inLibrary && !seen.has(dupKey)) {
-          seen.add(dupKey);
-          items.push({ type: 'openQuestions', question, answer: value, value });
+        const question = (ctx.labelText || ctx.placeholder || c.name || '开放题').slice(0, 60);
+        const inLibrary = (profile.data.openQuestions || []).some((q) => q.question === question && q.answer === c.value);
+        if (!inLibrary) {
+          items.push({
+            type: 'openQuestions', fieldKey: 'openQuestions', question, answer: c.value, pageValue: c.value,
+            state: triStateOf(profile, 'openQuestions', c.value), label: question, selector: c.selector,
+            module: c.module, rowGroup: c.rowGroup, confidence: 80, frame: c.frame,
+          });
         }
         continue;
       }
-      const m = AS.matcher.matchField(ctx, rule);
+
+      // 三级匹配
+      const m = AS.matcher.matchForCapture(ctx, c.el, { memories, rule, profile, aliases });
       if (m) {
         const base = m.fieldKey.replace(/\[\d+\]/g, '');
         const [catId] = base.split('.');
         const cat = AS.schema.findCategory(catId);
-        if (cat && !cat.repeatable && catId !== 'openQuestions') {
-          const vals = AS.matcher.resolveValues(profile, m.fieldKey);
-          if (!vals.includes(value)) { // 库中已有相同值则跳过
-            const dupKey = 'f|' + base + '|' + value;
-            if (!seen.has(dupKey)) {
-              seen.add(dupKey);
-              items.push({
-                type: 'field', fieldKey: m.fieldKey, catId, key: base.split('.')[1],
-                label: ctx.labelText || ctx.placeholder || ctx.name || '未知字段',
-                value,
-              });
-            }
-          }
-        }
+        // 经历类: 整行捕获(rowGroup)合并处理, 单字段也收集
+        if (!cat || catId === 'openQuestions') continue;
+        const state = triStateOf(profile, m.fieldKey, c.value);
+        const dupKey = 'f|' + m.fieldKey + '|' + c.rowGroup + '|' + c.value;
+        if (seen.has(dupKey)) continue;
+        seen.add(dupKey);
+        items.push({
+          type: cat.repeatable ? 'entry' : 'field',
+          fieldKey: m.fieldKey, catId, key: base.split('.')[1],
+          pageValue: c.value, state, confidence: m.confidence, level: m.level,
+          label: ctx.labelText || c.placeholder || c.name || c.label || '未知字段',
+          selector: c.selector, module: c.module, rowGroup: c.rowGroup,
+          frame: c.frame, display: c.display,
+        });
         continue;
       }
-      // 未匹配字段 → 智能收录为自定义字段(下次遇到自动填充, 无需手动加字段)
-      const labelText = ctx.labelText || ctx.placeholder || ctx.name || '';
+
+      // 未匹配 → 智能收录为自定义字段
+      const labelText = ctx.labelText || c.placeholder || c.name || '';
       const key = labelText ? AS.fuzzy.normalize(labelText).slice(0, 20) : '';
-      if (key && key.length >= 2 && !/(验证码|captcha|滑块|校验码)/i.test(labelText)) {
-        const dup = (profile.data.custom || []).some((c) => c.key === key && c.value === value);
-        const dupKey = 'c|' + key + '|' + value;
-        if (!dup && !seen.has(dupKey)) {
+      if (key && key.length >= 2) {
+        const existing = (profile.data.custom || []).find((x) => x.key === key);
+        const state = existing ? (String(existing.value) === c.value ? 'same' : 'diff') : 'new';
+        const dupKey = 'c|' + key + '|' + c.value;
+        if (!seen.has(dupKey)) {
           seen.add(dupKey);
-          items.push({ type: 'custom', key, label: labelText.slice(0, 20), value });
+          items.push({
+            type: 'custom', fieldKey: 'custom.' + key, key,
+            pageValue: c.value, state, confidence: 45, level: 'fallback',
+            label: labelText.slice(0, 20), selector: c.selector,
+            module: c.module, rowGroup: c.rowGroup, frame: c.frame, display: c.display,
+          });
         }
       }
     }

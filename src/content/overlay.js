@@ -66,6 +66,27 @@
 .af-fp-row .fp-text { flex: 1; }
 .af-fp-count { display: inline-block; background: #eff6ff; color: #2563eb; border-radius: 10px; padding: 0 8px; font-size: 11px; }
 .af-fp-divider { border-top: 1px solid #f1f5f9; margin: 4px 0; }
+.af-cap-stats { display: flex; gap: 10px; font-size: 12px; color: #374151; margin-bottom: 8px; flex-wrap: wrap; align-items: center; }
+.af-cap-stats .s-same { color: #9ca3af; }
+.af-cap-stats .s-diff { color: #d97706; }
+.af-cap-stats .s-new { color: #2563eb; }
+.af-cap-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.af-cap-tab { font-size: 11.5px; padding: 3px 10px; border-radius: 12px; background: #f3f4f6; color: #6b7280; cursor: pointer; }
+.af-cap-tab.active { background: #2563eb; color: #fff; }
+.af-cap-list { max-height: 300px; }
+.af-capture-row { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid #f3f4f6; font-size: 12px; }
+.af-capture-row:last-child { border-bottom: 0; }
+.af-capture-row.st-same { background: #f9fafb; color: #9ca3af; }
+.af-capture-row.st-diff { background: #fffbeb; }
+.af-capture-row.st-new { background: #eff6ff; border-left: 3px solid #2563eb; }
+.af-capture-row .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #374151; }
+.af-capture-row .v { display: flex; align-items: center; gap: 4px; max-width: 55%; }
+.af-capture-row .v .old { color: #b45309; text-decoration: line-through; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-capture-row .v .new { color: #2563eb; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-capture-row .v .arrow { color: #d97706; }
+.af-mini-sel { font-size: 10.5px; padding: 1px 4px; border: 1px solid #d1d5db; border-radius: 5px; }
+.af-cap-batch { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.af-cap-batch .af-btn { flex: none; padding: 4px 8px; font-size: 11px; }
 `;
 
   // host 元素: 版本升级后旧 overlay 残留时先清理, 避免重复面板
@@ -342,59 +363,160 @@
     return panel;
   }
 
-  // ---------- 学习模式: 捕获页面已填内容 ----------
+  // ---------- 学习模式: 交互式捕获预览面板 v2 ----------
+  // 统计/模块标签/三态样式(一致灰·差异黄·新增蓝)/批量操作/归属/拉黑/二次确认/进度
   function showLearnPanel(items, onDone) {
     if (!items || !items.length) {
-      toast('未发现可导入的新资料(页面填写内容与信息库相同, 或字段无法识别)');
+      toast('未发现可捕获的内容(页面无已填写字段或均与信息库一致)');
       return;
     }
-    const selected = new Set(items.map((_, i) => i));
-    const rows = items.map((it, i) => {
-      const label = it.type === 'openQuestions' ? ('开放题: ' + (it.question || '开放题')) : it.label || it.fieldKey || '字段';
-      const cb = h('input', { type: 'checkbox', checked: '', dataIdx: String(i) });
+    const selected = new Set();
+    const blacklistAdd = [];
+    // 默认勾选: 差异+新增; 一致不勾
+    items.forEach((it, i) => { if (it.state === 'diff' || it.state === 'new') selected.add(i); });
+    const stats = { total: items.length, same: 0, diff: 0, fresh: 0 };
+    items.forEach((it) => { stats[it.state === 'same' ? 'same' : it.state === 'diff' ? 'diff' : 'fresh']++; });
+
+    // 模块标签
+    const mods = [...new Set(items.map((it) => it.module || '其他'))];
+    let activeMod = mods[0] || '其他';
+    const filteredItems = () => items.filter((it) => (it.module || '其他') === activeMod);
+
+    const rowFor = (it, i) => {
+      const cls = 'af-capture-row ' + (it.state === 'same' ? 'st-same' : it.state === 'diff' ? 'st-diff' : 'st-new');
+      const row = h('div', { class: cls, 'data-idx': String(i) });
+      const cb = h('input', { type: 'checkbox', checked: selected.has(i) ? '' : undefined, 'data-idx': String(i) });
       cb.addEventListener('change', (e) => {
         if (e.target.checked) selected.add(i); else selected.delete(i);
+        renderStats();
       });
-      return h('div', { class: 'af-item' }, [
-        cb,
-        h('span', { class: 't', style: 'flex:1', text: label }),
-        h('span', { style: 'color:#2563eb;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', text: String(it.value).slice(0, 30) }),
-      ]);
-    });
+      row.appendChild(cb);
+      const label = h('span', { class: 't', text: (it.label || it.fieldKey || '未知字段').slice(0, 22) });
+      row.appendChild(label);
+      const valWrap = h('span', { class: 'v' });
+      if (it.state === 'diff') {
+        valWrap.appendChild(h('span', { class: 'old', text: '原:' + String(it.oldValue !== undefined ? it.oldValue : '—').slice(0, 16) }));
+        valWrap.appendChild(h('span', { class: 'arrow', text: '→' }));
+        valWrap.appendChild(h('span', { class: 'new', text: String(it.pageValue).slice(0, 16) }));
+      } else {
+        valWrap.appendChild(h('span', { class: 'new', text: String(it.pageValue).slice(0, 24) }));
+      }
+      row.appendChild(valWrap);
+      // 新增项: 归属模块下拉
+      if (it.state === 'new' && it.type === 'custom') {
+        const sel = h('select', { class: 'af-mini-sel' });
+        sel.appendChild(h('option', { value: 'custom', text: '自定义字段' }));
+        ['basic', 'skills', 'intent'].forEach((c) => sel.appendChild(h('option', { value: c, text: (AS.schema.findCategory(c) || {}).name || c })));
+        sel.value = it.targetCat || 'custom';
+        sel.addEventListener('change', (e) => { it.targetCat = e.target.value; });
+        row.appendChild(sel);
+      }
+      return row;
+    };
+
+    function renderStats() {
+      const el = shadow.querySelector('#af-cap-stats');
+      if (!el) return;
+      const selCount = items.filter((_, i) => selected.has(i)).length;
+      el.innerHTML = '';
+      el.appendChild(h('span', { text: `共 ${stats.total} 项` }));
+      el.appendChild(h('span', { class: 's-same', text: `一致 ${stats.same}` }));
+      el.appendChild(h('span', { class: 's-diff', text: `差异 ${stats.diff}` }));
+      el.appendChild(h('span', { class: 's-new', text: `新增 ${stats.fresh}` }));
+      el.appendChild(h('b', { style: 'margin-left:8px', text: `已选 ${selCount}` }));
+    }
+
+    function renderList() {
+      const listEl = shadow.querySelector('#af-cap-list');
+      if (!listEl) return;
+      listEl.innerHTML = '';
+      filteredItems().forEach((it) => {
+        const i = items.indexOf(it);
+        listEl.appendChild(rowFor(it, i));
+      });
+      renderStats();
+    }
+
+    function renderTabs() {
+      const tabEl = shadow.querySelector('#af-cap-tabs');
+      if (!tabEl) return;
+      tabEl.innerHTML = '';
+      mods.forEach((m) => {
+        const count = items.filter((it) => (it.module || '其他') === m).length;
+        const tab = h('span', { class: 'af-cap-tab' + (m === activeMod ? ' active' : ''), text: `${m} (${count})` });
+        tab.addEventListener('click', () => { activeMod = m; renderTabs(); renderList(); });
+        tabEl.appendChild(tab);
+      });
+    }
+
     const panel = showPanel(h('div', {}, [
-      head('发现可导入的新资料'),
+      head('捕获确认', h('button', { class: 'af-close', text: '×', onclick: closePanel })),
       h('div', { class: 'af-body' }, [
-        h('p', { style: 'font-size:12px;color:#6b7280;margin-bottom:8px', text: '以下内容与信息库不同/缺失, 勾选后导入本地信息库, 下次遇到匹配字段将自动填充。' }),
-        h('div', { class: 'af-list', style: 'max-height:300px' }, rows),
+        h('div', { id: 'af-cap-stats', class: 'af-cap-stats' }),
+        h('div', { id: 'af-cap-tabs', class: 'af-cap-tabs' }),
+        h('div', { id: 'af-cap-list', class: 'af-list af-cap-list' }),
+        h('div', { class: 'af-cap-batch' }, [
+          h('button', { class: 'af-btn ghost', text: '全选差异', onclick: () => {
+            items.forEach((it, i) => { if (it.state === 'diff') selected.add(i); });
+            renderList();
+          } }),
+          h('button', { class: 'af-btn ghost', text: '全选新增', onclick: () => {
+            items.forEach((it, i) => { if (it.state === 'new') selected.add(i); });
+            renderList();
+          } }),
+          h('button', { class: 'af-btn ghost', text: '全不选', onclick: () => {
+            selected.clear();
+            renderList();
+          } }),
+          h('button', { class: 'af-btn ghost', text: '🚫 拉黑所选字段', onclick: async () => {
+            const chosen = items.filter((_, i) => selected.has(i));
+            if (!chosen.length) { toast('请先勾选要拉黑的字段'); return; }
+            const ig = await AS.storage.getCaptureIgnore();
+            const newKw = [];
+            chosen.forEach((it) => {
+              const kw = (it.label || '').slice(0, 12);
+              if (kw && !ig.keywords.includes(kw)) newKw.push(kw);
+            });
+            if (newKw.length) {
+              ig.keywords = ig.keywords.concat(newKw);
+              await AS.storage.saveCaptureIgnore(ig);
+              toast(`已拉黑 ${newKw.length} 个关键词, 下次捕获自动忽略`);
+            }
+            selected.clear();
+            renderList();
+          } }),
+        ]),
         h('div', { class: 'af-actions' }, [
           h('button', { class: 'af-btn ghost', text: '取消', onclick: closePanel }),
-          h('button', { class: 'af-btn primary', text: '导入所选', onclick: async () => {
+          h('button', { class: 'af-btn primary', text: '✔ 确认入库', onclick: async () => {
             const chosen = items.filter((_, i) => selected.has(i));
-            if (!chosen.length) { toast('未选择任何项'); return; }
+            if (!chosen.length) { toast('未勾选任何项'); return; }
+            if (!confirm('确认将所选内容写入本地信息库? 写入前将自动备份, 可随时回滚。')) return;
             const btn = panel.querySelector('.af-btn.primary');
-            btn.disabled = true; btn.textContent = '导入中...';
+            btn.disabled = true; btn.textContent = '入库中...';
             try {
               const r = await chrome.runtime.sendMessage({ type: 'AF_LEARN_SAVE', items: chosen });
               if (r && r.saved > 0) {
-                toast(`已导入 ${r.saved} 项到信息库 ✔` + (r.same ? `, ${r.same} 项与库中相同` : ''));
+                toast(`已入库 ✔ 更新 ${r.updated || 0} · 新增 ${r.added || 0}${r.same ? ' · 相同跳过 ' + r.same : ''}${r.locked ? ' · 加密锁定 ' + r.locked : ''}`);
                 closePanel();
-                onDone && onDone(r.saved);
+                onDone && onDone(r);
               } else {
-                btn.disabled = false; btn.textContent = '导入所选';
+                btn.disabled = false; btn.textContent = '✔ 确认入库';
                 const reasons = [];
-                if (r && r.same) reasons.push(`${r.same} 项与信息库完全相同`);
                 if (r && r.locked) reasons.push(`${r.locked} 项为加密字段(需先在设置解锁)`);
                 if (r && r.error) reasons.push(r.error);
-                toast(reasons.length ? '无可导入: ' + reasons.join('; ') : '没有可导入的新内容');
+                toast(reasons.length ? '入库失败: ' + reasons.join('; ') : '没有可入库的内容');
               }
             } catch (e) {
-              btn.disabled = false; btn.textContent = '导入所选';
-              toast('导入失败: ' + (e.message || e));
+              btn.disabled = false; btn.textContent = '✔ 确认入库';
+              toast('入库失败: ' + (e.message || e));
             }
           } }),
         ]),
       ]),
     ]));
+    renderTabs();
+    renderList();
     return panel;
   }
 

@@ -581,6 +581,88 @@
     card.appendChild(addRow);
   }
 
+  // ---------- 捕获忽略黑名单 ----------
+  function renderCaptureIgnore(card) {
+    card.appendChild(UI().el('h3', { text: '捕获忽略黑名单', children: [UI().el('span', { class: 'badge', text: '捕获时自动跳过' })] }));
+    card.appendChild(UI().el('p', { class: 'view-sub', style: 'margin-bottom:12px', text: '按关键词忽略页面字段(内置: 验证码/滑块/密码等)。匹配到关键词的字段不会被「捕获页面已填内容」收录。' }));
+    const listEl = UI().el('div', { style: 'margin-bottom:8px;max-width:640px' });
+    const renderItems = async () => {
+      const ig = await AS.storage.getCaptureIgnore();
+      listEl.innerHTML = '';
+      ig.keywords.forEach((kw) => {
+        const row = UI().el('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12.5px' });
+        row.appendChild(UI().el('span', { style: 'flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px', text: kw }));
+        row.appendChild(UI().el('button', {
+          class: 'btn sm danger', text: '移除', onclick: async () => {
+            const g = await AS.storage.getCaptureIgnore();
+            g.keywords = g.keywords.filter((x) => x !== kw);
+            await AS.storage.saveCaptureIgnore(g);
+            renderItems();
+          },
+        }));
+        listEl.appendChild(row);
+      });
+    };
+    renderItems();
+    card.appendChild(listEl);
+    const addRow = UI().el('div', { style: 'display:flex;gap:8px;max-width:640px' });
+    const kwInput = UI().el('input', { type: 'text', placeholder: '关键词(如: 面试安排时间)', style: 'flex:1;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px' });
+    const addB = UI().el('button', {
+      class: 'btn sm', text: '添加', onclick: async () => {
+        const kw = kwInput.value.trim();
+        if (!kw) return UI().toast('请输入关键词', 'error');
+        const ig = await AS.storage.getCaptureIgnore();
+        if (!ig.keywords.includes(kw)) {
+          ig.keywords.push(kw);
+          await AS.storage.saveCaptureIgnore(ig);
+        }
+        kwInput.value = '';
+        renderItems();
+      },
+    });
+    addRow.appendChild(kwInput);
+    addRow.appendChild(addB);
+    card.appendChild(addRow);
+  }
+
+  // ---------- 捕获历史(详情/回滚) ----------
+  function renderCaptureHistory(card) {
+    card.appendChild(UI().el('h3', { text: '捕获历史', children: [UI().el('span', { class: 'badge', text: '每次入库自动快照, 可回滚' })] }));
+    card.appendChild(UI().el('p', { class: 'view-sub', style: 'margin-bottom:12px', text: '最近 30 次捕获入库操作。每次入库前自动备份全量数据, 可一键回滚。' }));
+    const listEl = UI().el('div', { id: 'capHistoryList', style: 'max-width:760px' });
+    const renderItems = async () => {
+      const list = await AS.storage.getCaptureHistory();
+      listEl.innerHTML = '';
+      if (!list.length) {
+        listEl.appendChild(UI().el('div', { style: 'font-size:12px;color:#9ca3af', text: '暂无捕获历史' }));
+        return;
+      }
+      list.forEach((h) => {
+        const row = UI().el('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:6px;font-size:12.5px;border:1px solid #eef2f7;border-radius:8px;padding:8px 12px' });
+        const label = `${new Date(h.time).toLocaleString('zh-CN')} · ${h.host || '未知站点'} · 更新${h.stats.updated || 0} 新增${h.stats.added || 0} 一致${h.stats.same || 0}`;
+        row.appendChild(UI().el('span', { style: 'flex:1;color:#374151', text: label }));
+        row.appendChild(UI().el('button', {
+          class: 'btn sm', text: '详情', onclick: () => {
+            const items = (h.items || []).slice(0, 15);
+            const detail = items.map((it) => `· ${it.label || it.fieldKey} [${it.state || '?'}] ${String(it.pageValue || '').slice(0, 30)} (置信${it.confidence || '-'})`).join('\n') || '无明细';
+            alert('捕获明细:\n\n' + detail + (items.length === 15 && (h.items || []).length > 15 ? '\n...' : ''));
+          },
+        }));
+        row.appendChild(UI().el('button', {
+          class: 'btn sm danger', text: '回滚', onclick: async () => {
+            if (!confirm(`回滚 ${new Date(h.time).toLocaleString('zh-CN')} 的捕获入库? 当前数据将被该快照覆盖。`)) return;
+            const ok = await AS.storage.rollbackCaptureHistory(h.id);
+            UI().toast(ok ? '已回滚到该次入库前状态' : '回滚失败', ok ? 'success' : 'error');
+            if (ok) setTimeout(() => location.reload(), 600);
+          },
+        }));
+        listEl.appendChild(row);
+      });
+    };
+    renderItems();
+    card.appendChild(listEl);
+  }
+
   function renderBackup(card) {
     card.appendChild(UI().el('h3', { text: '数据备份与恢复' }));
     card.appendChild(UI().el('p', { class: 'view-sub', style: 'margin-bottom:12px', text: '导出全量数据(信息库/台账/规则/设置)为 JSON 备份文件, 可换设备、换浏览器恢复。' }));
@@ -732,6 +814,10 @@
     renderAdvanced(cAdv);
     const cTips = UI().el('div', { class: 'card' });
     renderSiteTips(cTips);
+    const cCapIg = UI().el('div', { class: 'card' });
+    renderCaptureIgnore(cCapIg);
+    const cCapHist = UI().el('div', { class: 'card' });
+    renderCaptureHistory(cCapHist);
     const c2 = UI().el('div', { class: 'card' });
     renderEncryption(c2);
     const c3 = UI().el('div', { class: 'card' });
@@ -747,6 +833,8 @@
     container.appendChild(cFlow);
     container.appendChild(cAdv);
     container.appendChild(cTips);
+    container.appendChild(cCapIg);
+    container.appendChild(cCapHist);
     container.appendChild(c2);
     container.appendChild(c3);
     container.appendChild(c4);

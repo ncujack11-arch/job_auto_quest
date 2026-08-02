@@ -356,5 +356,60 @@
     } catch (e) { return ''; }
   }
 
-  AS.matcher = { buildContext, signatureOf, matchField, matchCustomField, resolveValues, resolveOpenQuestion, isOpenQuestionField, genSelector, MATCH_THRESHOLD };
+  // ---------- 三级匹配(捕获入库用) ----------
+  // opts: { memories, rule, profile, aliases } → { fieldKey, confidence, level } 或 null
+  function matchForCapture(ctx, el, opts) {
+    const fz = FUZZY();
+    // 1) 选择器记忆(最高置信)
+    const sel = genSelector(el);
+    if (opts && opts.memories && sel && opts.memories[sel]) {
+      return { fieldKey: opts.memories[sel], confidence: 95, level: 'memory' };
+    }
+    // 2) 语义匹配(站点映射/关键词)
+    const m = matchField(ctx, opts && opts.rule);
+    if (m) {
+      let confidence = 60;
+      if (m.via === 'site-mapping') confidence = 92;
+      else if (m.confidence === 'high') confidence = 85;
+      else if (m.confidence === 'medium') confidence = 72;
+      else confidence = 58;
+      return { fieldKey: m.fieldKey, confidence, level: 'semantic' };
+    }
+    // 2.5) 用户别名(自学习累积)
+    if (opts && opts.aliases) {
+      const text = (ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id).trim();
+      if (text) {
+        for (const [fk, labels] of Object.entries(opts.aliases)) {
+          if (!labels || !labels.length) continue;
+          if (labels.some((l) => fz.normalize(l) && fz.containsAny(text, [l]))) {
+            const vals = resolveValues(opts.profile, fk);
+            if (vals.length) return { fieldKey: fk, confidence: 78, level: 'alias' };
+          }
+        }
+      }
+    }
+    // 3) 区域兜底: label 短文本与库字段名相似度(低置信)
+    if (opts && opts.profile && ctx.labelText) {
+      const lt = fz.normalize(ctx.labelText);
+      if (lt.length >= 2 && lt.length <= 10) {
+        let best = null;
+        for (const [fk, def] of Object.entries(SCHEMA().FLAT)) {
+          const base = fk.replace(/\[\d+\]/g, '');
+          const cat = SCHEMA().findCategory(base.split('.')[0]);
+          if (cat && cat.repeatable) continue; // 经历类走语义匹配
+          const score = fz.similarity(lt, fz.normalize(def.label));
+          if (score > 0.62 && (!best || score > best.score)) {
+            best = { fieldKey: fk, confidence: Math.round(score * 70), level: 'region' };
+          }
+        }
+        if (best) {
+          const vals = resolveValues(opts.profile, best.fieldKey);
+          if (vals.length) return best;
+        }
+      }
+    }
+    return null;
+  }
+
+  AS.matcher = { buildContext, signatureOf, matchField, matchCustomField, matchForCapture, resolveValues, resolveOpenQuestion, isOpenQuestionField, genSelector, MATCH_THRESHOLD };
 })();

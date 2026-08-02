@@ -293,7 +293,7 @@ load('options/options.js');
   await AS.optionsUI.route();
   await delay(30);
   view = global._idMap['view'];
-  t('设置页渲染(填充策略/黑白名单/加密/状态流/进阶/备份/调试)', ['填充策略', '域名黑白名单', '敏感数据加密', '进度状态流', '进阶功能', '数据备份与恢复', '调试'].every((k) => (view.textContent || '').includes(k)));
+  t('设置页渲染(填充策略/黑白名单/加密/状态流/进阶/备份/调试/捕获)', ['填充策略', '域名黑白名单', '敏感数据加密', '进度状态流', '进阶功能', '数据备份与恢复', '调试', '捕获忽略黑名单', '捕获历史'].every((k) => (view.textContent || '').includes(k)));
   // autoLock 开关切换
   const lockChk = global._idMap['autoLockChk'];
   t('存在自动锁定开关', !!lockChk);

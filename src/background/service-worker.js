@@ -435,54 +435,136 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case 'AF_LEARN_SAVE':
       AS.storage.getActiveProfile().then(async (profile) => {
         if (!profile) return sendResponse({ saved: 0, error: '无信息方案' });
+        // 快照(回滚用)
+        const snapshot = await AS.storage.exportAll();
         const d = profile.data;
         const settings = await AS.storage.getSettings();
-        let saved = 0;
-        let same = 0, locked = 0, skipped = 0;
-        for (const it of msg.items || []) {
-          if (!it || it.value === undefined || it.value === null || String(it.value).trim() === '') { skipped++; continue; }
-          if (it.type === 'openQuestions') {
-            d.openQuestions = d.openQuestions || [];
-            const dup = d.openQuestions.some((q) => q.question === it.question && q.answer === it.answer);
-            if (!dup) { d.openQuestions.push({ question: it.question || '开放题', answer: String(it.value).trim() }); saved++; }
-            else same++;
-            continue;
-          }
-          if (it.type === 'custom') {
-            d.custom = d.custom || [];
-            const exist = d.custom.find((c) => c.key === it.key);
-            if (exist) {
-              if (String(exist.value) !== String(it.value).trim()) {
-                exist.value = String(it.value).trim();
-                exist.label = exist.label || it.label;
-                saved++;
-              }
+        const sourceHost = (sender && sender.tab && sender.tab.url) ? (() => { try { return new URL(sender.tab.url).hostname; } catch (e) { return ''; } })() : '';
+        let saved = 0, updated = 0, added = 0, same = 0, locked = 0, skipped = 0;
+        const learnedMemories = [];
+        const learnedAliases = [];
+        try {
+          // 经历条目: 按 (catId, rowGroup) 分组合成 entry
+          const entryGroups = new Map();
+          const flatItems = [];
+          for (const it of (msg.items || [])) {
+            if (it && it.type === 'entry') {
+              const catId = String(it.fieldKey || '').replace(/\[\d+\]/g, '').split('.')[0];
+              const gkey = catId + '|' + (it.rowGroup || 0);
+              if (!entryGroups.has(gkey)) entryGroups.set(gkey, []);
+              entryGroups.get(gkey).push(it);
             } else {
-              d.custom.push({ key: it.key || 'f' + Date.now().toString(36), label: it.label || '自定义', value: String(it.value).trim() });
-              saved++;
+              flatItems.push(it);
             }
-            continue;
           }
-          const base = String(it.fieldKey || '').replace(/\[\d+\]/g, '');
-          const [catId, key] = base.split('.');
-          const cat = AS.schema.findCategory(catId);
-          if (!cat || !key || cat.repeatable) { skipped++; continue; }
-          let val = String(it.value).trim();
-          const def = AS.schema.getFieldDef(base);
-          if (def && def.sensitive && settings.encryption && settings.encryption.enabled) {
-            if (AS.encrypt.hasKey()) {
-              try { val = await AS.encrypt.encryptWithSession(val); } catch (e) { LOG.error('bg', 'learn encrypt failed', e); }
+          const mergeEntry = (catId, groupItems) => {
+            const cat = AS.schema.findCategory(catId);
+            if (!cat) return 0;
+            const arr = d[catId] || (d[catId] = []);
+            const entry = {};
+            let anyValue = false;
+            groupItems.forEach((it) => {
+              const key = String(it.fieldKey || '').replace(/\[\d+\]/g, '').split('.')[1];
+              if (key && it.pageValue) {
+                entry[key] = String(it.pageValue).trim();
+                anyValue = true;
+              }
+            });
+            if (!anyValue) return 0;
+            // 名称+时间 组合去重: 更新已有条目或追加
+            const nameKey = catId === 'education' ? 'school' : catId === 'internship' ? 'intCompany' : 'projName';
+            const timeKey = catId === 'education' ? 'eduStart' : catId === 'internship' ? 'intStart' : 'projDuration';
+            const exist = arr.find((e) => e[nameKey] && e[nameKey] === entry[nameKey] && (entry[timeKey] ? e[timeKey] === entry[timeKey] : true));
+            if (exist) {
+              Object.assign(exist, entry);
+              updated++;
             } else {
-              locked++; // 加密未解锁, 跳过敏感字段
+              arr.push(entry);
+              added++;
+            }
+            saved++;
+            return 1;
+          };
+          entryGroups.forEach((g, gkey) => {
+            mergeEntry(gkey.split('|')[0], g);
+          });
+          for (const it of flatItems) {
+            if (!it || it.pageValue === undefined || it.pageValue === null || String(it.pageValue).trim() === '') { skipped++; continue; }
+            // 一致项默认不写(除非 force)
+            if (it.state === 'same' && !msg.force) { same++; continue; }
+            if (it.type === 'openQuestions') {
+              d.openQuestions = d.openQuestions || [];
+              const dup = d.openQuestions.some((q) => q.question === it.question && q.answer === it.answer);
+              if (!dup) { d.openQuestions.push({ question: it.question || '开放题', answer: String(it.pageValue).trim() }); added++; saved++; }
+              else same++;
               continue;
             }
+            if (it.type === 'custom') {
+              d.custom = d.custom || [];
+              const exist = d.custom.find((c) => c.key === it.key);
+              if (exist) {
+                if (String(exist.value) !== String(it.pageValue).trim()) {
+                  exist.value = String(it.pageValue).trim();
+                  exist.label = exist.label || it.label;
+                  exist._sourceDomain = sourceHost || exist._sourceDomain || '';
+                  exist._capturedAt = Date.now();
+                  exist._confidence = it.confidence;
+                  updated++;
+                } else same++;
+              } else {
+                d.custom.push({ key: it.key || 'f' + Date.now().toString(36), label: it.label || '自定义', value: String(it.pageValue).trim(), _sourceDomain: sourceHost, _capturedAt: Date.now(), _confidence: it.confidence });
+                added++;
+              }
+              saved++;
+              continue;
+            }
+            const base = String(it.fieldKey || '').replace(/\[\d+\]/g, '');
+            const [catId, key] = base.split('.');
+            const cat = AS.schema.findCategory(catId);
+            if (!cat || !key || cat.repeatable) { skipped++; continue; }
+            let val = String(it.pageValue).trim();
+            const def = AS.schema.getFieldDef(base);
+            if (def && def.sensitive && settings.encryption && settings.encryption.enabled) {
+              if (AS.encrypt.hasKey()) {
+                try { val = await AS.encrypt.encryptWithSession(val); } catch (e) { LOG.error('bg', 'learn encrypt failed', e); }
+              } else { locked++; continue; }
+            }
+            if (d[catId][key] !== val) { d[catId][key] = val; updated++; saved++; }
+            else same++;
+            // 自学习: 选择器记忆 + 标签别名
+            if (it.selector && it.fieldKey && !it.fieldKey.startsWith('reuse.')) {
+              learnedMemories.push({ sel: it.selector, fieldKey: it.fieldKey });
+            }
+            if (it.label && it.fieldKey && it.level !== 'fallback') {
+              learnedAliases.push({ fieldKey: it.fieldKey, label: it.label });
+            }
           }
-          if (d[catId][key] !== val) { d[catId][key] = val; saved++; }
-          else same++;
+          if (saved) { profile.updatedAt = Date.now(); await AS.storage.saveProfile(profile); }
+          // 自学习落库
+          try {
+            for (const m of learnedMemories.slice(0, 15)) await AS.storage.addMemory(sourceHost, m.sel, m.fieldKey);
+            for (const a of learnedAliases.slice(0, 15)) await AS.storage.addUserAlias(a.fieldKey, a.label);
+          } catch (e) { LOG.warn('bg', 'learn self-learning failed', e); }
+          // 捕获历史(含快照, 支持回滚)
+          try {
+            await AS.storage.addCaptureHistory({
+              id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+              time: Date.now(), host: sourceHost,
+              stats: { saved, updated, added, same, locked, skipped },
+              snapshot,
+              items: (msg.items || []).map((it) => ({
+                fieldKey: it.fieldKey, label: it.label, pageValue: it.pageValue, state: it.state, confidence: it.confidence,
+              })).slice(0, 50),
+            });
+          } catch (e) { LOG.warn('bg', 'history save failed', e); }
+          LOG.info('bg', 'learn saved', { saved, updated, added, same, locked, skipped });
+          sendResponse({ saved, updated, added, same, locked, skipped });
+        } catch (e) {
+          // 失败回滚: 恢复快照
+          LOG.error('bg', 'learn save failed, rollback', e);
+          try { await AS.storage.importAll(snapshot, { overwrite: true }); } catch (e2) { /* ignore */ }
+          sendResponse({ saved: 0, error: e.message || String(e), rolledBack: true });
         }
-        if (saved) { profile.updatedAt = Date.now(); await AS.storage.saveProfile(profile); }
-        LOG.info('bg', 'learn saved', saved, { same, locked, skipped });
-        sendResponse({ saved, same, locked, skipped });
       }).catch((e) => { LOG.error('bg', 'learn save failed', e); sendResponse({ saved: 0, error: e.message || String(e) }); });
       return true;
 

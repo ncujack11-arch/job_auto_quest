@@ -19,10 +19,13 @@
     SITE_MEMORIES: 'af_site_memories',
     LOGS: 'af_logs',
     QUIZ: 'af_quiz',
+    CAPTURE_IGNORE: 'af_capture_ignore',
+    CAPTURE_HISTORY: 'af_capture_history',
+    USER_ALIASES: 'af_user_aliases',
   };
 
   const DEFAULT_SETTINGS = {
-    version: '1.10.1',
+    version: '1.11.0',
     activeProfileId: null,
     conflictMode: 'skip',        // 'skip' | 'overwrite'
     typingMode: false,           // 逐字模拟输入
@@ -50,6 +53,7 @@
     'src/utils/dates.js',
     'src/utils/matcher.js',
     'src/content/scanner.js',
+    'src/content/capture.js',
     'src/content/filler.js',
     'src/content/overlay.js',
     'src/content/detect.js',
@@ -428,6 +432,73 @@
     return [];
   }
 
+  // ---------- 捕获忽略黑名单(内置默认 + 用户自定义) ----------
+  const DEFAULT_CAPTURE_IGNORE = {
+    keywords: ['验证码', 'captcha', '滑块', '校验码', '图形码', '图形验证'],
+    exact: [],
+  };
+  async function getCaptureIgnore() {
+    const t = await get(KEYS.CAPTURE_IGNORE, null);
+    if (t === null || t === undefined) {
+      const d = JSON.parse(JSON.stringify(DEFAULT_CAPTURE_IGNORE));
+      await set(KEYS.CAPTURE_IGNORE, d);
+      return d;
+    }
+    return { keywords: t.keywords || [], exact: t.exact || [] };
+  }
+  async function saveCaptureIgnore(obj) {
+    await set(KEYS.CAPTURE_IGNORE, { keywords: obj.keywords || [], exact: obj.exact || [] });
+  }
+  async function isIgnoredText(text) {
+    const ig = await getCaptureIgnore();
+    const t = String(text || '').toLowerCase();
+    if (ig.keywords.some((k) => k && t.includes(String(k).toLowerCase()))) return true;
+    return ig.exact.some((k) => k && t === String(k).toLowerCase());
+  }
+
+  // ---------- 用户别名库(自学习: 匹配成功的 label 追加, 提升后续匹配) ----------
+  // { fieldKey: [label, ...] }
+  async function getUserAliases() { return (await get(KEYS.USER_ALIASES, {})) || {}; }
+  async function saveUserAliases(map) { await set(KEYS.USER_ALIASES, map || {}); }
+  async function addUserAlias(fieldKey, label) {
+    const map = await getUserAliases();
+    const base = String(fieldKey || '').replace(/\[\d+\]/g, '');
+    const l = String(label || '').trim();
+    if (!base || !l) return;
+    if (!map[base]) map[base] = [];
+    if (!map[base].includes(l)) {
+      map[base].push(l);
+      if (map[base].length > 50) map[base].shift();
+      await set(KEYS.USER_ALIASES, map);
+    }
+  }
+
+  // ---------- 捕获历史(含入库前快照, 支持回滚) ----------
+  const CAPTURE_HISTORY_MAX = 30;
+  async function getCaptureHistory() { return (await get(KEYS.CAPTURE_HISTORY, [])) || []; }
+  async function addCaptureHistory(entry) {
+    const list = await getCaptureHistory();
+    list.unshift(entry);
+    while (list.length > CAPTURE_HISTORY_MAX) list.pop();
+    await set(KEYS.CAPTURE_HISTORY, list);
+    return entry.id;
+  }
+  async function getCaptureHistoryItem(id) {
+    const list = await getCaptureHistory();
+    return list.find((h) => h.id === id) || null;
+  }
+  async function removeCaptureHistory(id) {
+    const list = await getCaptureHistory();
+    await set(KEYS.CAPTURE_HISTORY, list.filter((h) => h.id !== id));
+  }
+  // 回滚: 用快照恢复 profile
+  async function rollbackCaptureHistory(id) {
+    const item = await getCaptureHistoryItem(id);
+    if (!item || !item.snapshot) return false;
+    await importAll(item.snapshot, { overwrite: true });
+    return true;
+  }
+
   // ---------- 备份 / 恢复 ----------
   async function exportAll() {
     return {
@@ -476,6 +547,9 @@
     appendLog, getLogs, clearLogs,
     getQuiz, saveQuiz, addQuizItem,
     BUILTIN_TIPS, getSiteTips, saveSiteTips, getTipsForHost,
+    DEFAULT_CAPTURE_IGNORE, getCaptureIgnore, saveCaptureIgnore, isIgnoredText,
+    getUserAliases, saveUserAliases, addUserAlias,
+    getCaptureHistory, addCaptureHistory, getCaptureHistoryItem, removeCaptureHistory, rollbackCaptureHistory,
     exportAll, importAll, clearAll,
   };
 })();

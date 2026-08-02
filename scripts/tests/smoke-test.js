@@ -217,6 +217,33 @@ function t(name, cond) {
   const cv2 = AS.matcher.resolveValues(learnProfile2, 'custom.是否有xxx经历');
   t('custom 值解析(label 一致)', cv2[0] === '是');
 
+  console.log('== 捕获 v2: 三级匹配/黑名单/别名/历史 ==');
+  // 三级匹配
+  const capCtx = (o) => Object.assign({ tag: 'input', type: 'text', name: '', id: '', placeholder: '', ariaLabel: '', dataTexts: [], labelText: '', rowText: '', prevText: '' }, o);
+  const capProfile = { data: { basic: { name: '张三', phone: '13800138000' }, custom: [{ key: '有无专利', label: '有无专利', value: '有' }] } };
+  const capM1 = AS.matcher.matchForCapture(capCtx({ labelText: '姓名' }), { id: '', name: 'x', tagName: 'INPUT' }, { memories: { 'input[name="x"]': 'basic.name' }, profile: capProfile });
+  t('三级匹配: 记忆命中(置信95)', capM1 && capM1.confidence === 95 && capM1.fieldKey === 'basic.name');
+  const capM2 = AS.matcher.matchForCapture(capCtx({ labelText: '姓名' }), {}, { profile: capProfile });
+  t('三级匹配: 语义命中', capM2 && capM2.fieldKey === 'basic.name' && capM2.confidence >= 72);
+  const capM3 = AS.matcher.matchForCapture(capCtx({ labelText: '有无专利' }), {}, { profile: capProfile, aliases: { 'custom.有无专利': ['有无专利'] } });
+  t('三级匹配: 用户别名命中', capM3 && capM3.fieldKey === 'custom.有无专利' && capM3.confidence === 78);
+  // 忽略黑名单
+  await AS.storage.saveCaptureIgnore({ keywords: ['验证码', 'captcha'], exact: ['内推码'] });
+  t('忽略黑名单: 关键词命中', (await AS.storage.isIgnoredText('请输入验证码')) === true);
+  t('忽略黑名单: 无关文本放行', (await AS.storage.isIgnoredText('手机号码')) === false);
+  // 用户别名
+  await AS.storage.addUserAlias('basic.name', '昵称');
+  const aliases = await AS.storage.getUserAliases();
+  t('自学习别名: 已追加', (aliases['basic.name'] || []).includes('昵称'));
+  // 捕获历史 + 回滚
+  const backupPayload = await AS.storage.exportAll();
+  await AS.storage.saveSettings({ conflictMode: 'overwrite' });
+  await AS.storage.addCaptureHistory({ id: 'ch1', time: Date.now(), host: 'test.com', stats: { updated: 1, added: 0, same: 0 }, snapshot: backupPayload, items: [] });
+  t('捕获历史: 记录可查', !!(await AS.storage.getCaptureHistoryItem('ch1')));
+  const okRollback = await AS.storage.rollbackCaptureHistory('ch1');
+  const after = await AS.storage.getSettings();
+  t('捕获历史: 回滚恢复快照', okRollback === true && after.conflictMode === 'skip');
+
   console.log('== parser v1.7: 清洗/名录/置信度/来源/模板 ==');
   const dirty = [
     '姓名: 王五', '电话: 13712345678', 'www.resume-site.com', '1', '第 2 页',
