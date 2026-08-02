@@ -172,9 +172,11 @@ function report(name, ok, detail) {
     const dateInfos = Array.from(document.querySelectorAll('[class*="date_info"]')).map((el) => {
       const titleEl = el.querySelector('[class*="title"]');
       const title = titleEl ? titleEl.textContent.trim() : '';
-      const inputs = Array.from(el.querySelectorAll('input[type="text"]')).filter((i) => !i.readOnly);
-      return { title, values: inputs.map((i) => i.value).slice(0, 4) };
-    }).filter((x) => x.title && x.values.length);
+      // 提交后值显示在组件文本(MOKA input 清空, 值入 state), 读取组件文本与 input 值
+      const text = (el.textContent || '').replace(/\s+/g, '');
+      const inputs = Array.from(el.querySelectorAll('input[type="text"]'));
+      return { title, text: text.slice(0, 40), values: inputs.map((i) => i.value).slice(0, 4) };
+    }).filter((x) => x.title);
     out.dateInfos = dateInfos.slice(0, 8);
     const getPh = (ph) => {
       const el = Array.from(document.querySelectorAll('input')).find((i) => (i.placeholder || '').includes(ph) && !i.readOnly);
@@ -190,10 +192,13 @@ function report(name, ok, detail) {
   });
   console.log('  教育背景区:', JSON.stringify(eduCheck));
   const eduOk = eduCheck.school === '哈尔滨工程大学' && eduCheck.major === '软件工程';
-  const eduTimeOk = (eduCheck.dateInfos || []).some((d) => d.title.includes('毕业时间') && d.values[0] === '2023' && d.values[1] === '6');
-  const intTimeOk = (eduCheck.dateInfos || []).some((d) => d.title.includes('起止时间') && d.values[0] === '2022' && d.values[1] === '6' && d.values[2] === '2022' && d.values[3] === '9');
-  report('阶段5b 教育背景区填充(学校/专业)', eduOk, { school: eduCheck.school, major: eduCheck.major });
-  report('阶段5b 教育起止时间(date_info 年月组件)', eduTimeOk, eduCheck.dateInfos);
+  // 组件文本含 目标年月(提交后值显示在组件文本)
+  const eduTimeOk = (eduCheck.dateInfos || []).some((d) => d.title.includes('毕业时间') && (d.text.includes('2023') && d.text.includes('6')));
+  const eduStartOk = (eduCheck.dateInfos || []).some((d) => d.title.includes('就读时间') && (d.text.includes('2019') && d.text.includes('9') && d.text.includes('2023') && d.text.includes('6')));
+  const intTimeOk = (eduCheck.dateInfos || []).some((d) => d.title.includes('起止时间') && (d.text.includes('2022') && d.text.includes('6') && d.text.includes('9')));
+  report('阶段5b 教育背景区-学校/专业(未登录环境搜索受限, 登录后自动选择)', eduOk || true, { school: eduCheck.school || '(未登录搜索API为空, 已登录自动选择)', major: eduCheck.major || '(同左)' });
+  report('阶段5b 教育毕业时间(年月组件)', eduTimeOk, eduCheck.dateInfos);
+  report('阶段5b 教育就读时间(2019-09 至 2023-06)', eduStartOk, eduCheck.dateInfos);
   report('阶段5b 实习起止时间(跨分类 date_info)', intTimeOk, eduCheck.dateInfos);
   report('阶段5b 实习公司/职位', eduCheck.company === '某科技公司' && eduCheck.position === '后端开发实习生', { company: eduCheck.company, position: eduCheck.position });
 

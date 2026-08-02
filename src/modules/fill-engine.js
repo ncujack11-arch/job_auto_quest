@@ -169,6 +169,7 @@
     const memoriesQueue = [];
     const unmatchedEls = [];
     let done = 0;
+    let lastFilledEl = null;
     const total = items.length;
     if (total > 3) showProgress(0, total, '正在填充');
     // 级联选择器状态: 相同字段的连续下拉(如 籍贯: 省→市→县 / 日期年/月)依次用值的分段
@@ -187,16 +188,12 @@
       if (total > 3 && done % 2 === 0) showProgress(done, total, '正在填充');
       setFillState('filling', `正在填充 ${done}/${total}: ${label || fieldKey || '字段'}`);
       if (!fctx.visible) continue;
-      // 动态元素重定位: React/Vue 重渲染后 el 可能失效, 用生成选择器重新查找(年月组件等自定义控件常见)
-      if (sel) {
+      // 动态元素重定位: React/Vue 重渲染后 el 可能失效, 用生成选择器重新查找(仅当元素脱离 DOM 时, 避免索引错位)
+      if (sel && !item.field.el.isConnected) {
         try {
           const fresh = AS.matcher.resolveSelector(sel);
           if (fresh && fresh !== item.field.el) item.field.el = fresh;
         } catch (e) { /* ignore */ }
-      }
-      // 填充自动滚动跟随: 滚动到当前正在填写的字段(设置可关闭)
-      if (!opts || opts.autoScroll !== false) {
-        try { field.el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* ignore */ }
       }
       const snap = snapshotField(field);
       if (snap) snapshots.push(snap);
@@ -206,12 +203,12 @@
         const ctxText = fctx.labelText + ' ' + fctx.placeholder + ' ' + (field.el.accept || '');
         if (/(简历|resume|cv)/i.test(ctxText) && /(pdf|doc)/i.test((field.el.accept || '') + ctxText)) {
           const ok = await AS.filler.fillResumeFile(field.el);
-          if (ok) { report.filled++; highlight(field.el, 'af-highlight-ok'); }
+          if (ok) { report.filled++; lastFilledEl = field.el; highlight(field.el, 'af-highlight-ok'); }
           else { report.infos.push({ label, detail: '未配置简历文件, 请手动上传' }); }
           continue;
         }
         const r = await AS.filler.fillField(field, origValue, opts);
-        if (r.ok && r.action === 'filled') { report.filled++; }
+        if (r.ok && r.action === 'filled') { report.filled++; lastFilledEl = field.el; }
         else if (r.action === 'info') { report.infos.push({ label, detail: r.detail }); }
         continue;
       }
@@ -224,7 +221,7 @@
           if (!cascadeState.parts.length) cascadeState = null;
           const rSeg = await AS.filler.fillField(field, seg, opts);
           if (rSeg.ok && rSeg.action === 'filled') {
-            report.filled++;
+            report.filled++; lastFilledEl = field.el;
             highlight(field.el, 'af-highlight-ok');
           } else if (rSeg.action === 'skipped') {
             report.skipped++;
@@ -239,7 +236,7 @@
         // 2) 先尝试完整值
         const rFull = await AS.filler.fillField(field, origValue, opts);
         if (rFull.ok && rFull.action === 'filled') {
-          report.filled++;
+          report.filled++; lastFilledEl = field.el;
           highlight(field.el, 'af-highlight-ok');
           memPush(sel, fieldKey);
           continue;
@@ -255,7 +252,7 @@
           }
           if (rFirst.ok && rFirst.action === 'filled') {
             cascadeState = { key: fieldKey, parts };
-            report.filled++;
+            report.filled++; lastFilledEl = field.el;
             highlight(field.el, 'af-highlight-ok');
             memPush(sel, fieldKey);
             continue;
@@ -265,7 +262,7 @@
         await sleep(400);
         const retry = await AS.filler.fillField(field, origValue, opts);
         if (retry.ok && retry.action === 'filled') {
-          report.filled++;
+          report.filled++; lastFilledEl = field.el;
           highlight(field.el, 'af-highlight-ok');
           memPush(sel, fieldKey);
           continue;
@@ -275,7 +272,7 @@
         if (fallbackInput && !fallbackInput.disabled && !fallbackInput.readOnly) {
           const rFb = await AS.filler.fillField({ el: fallbackInput, type: fallbackInput.tagName === 'TEXTAREA' ? 'textarea' : 'text' }, origValue, opts);
           if (rFb.ok && rFb.action === 'filled' && String(fallbackInput.value) === String(origValue)) {
-            report.filled++;
+            report.filled++; lastFilledEl = field.el;
             report.infos.push({ label, detail: `下拉未匹配, 已降级为文本输入(${origValue})` });
             highlight(fallbackInput, 'af-highlight-ok');
             continue;
@@ -290,7 +287,7 @@
 
       const r = await AS.filler.fillField(field, origValue, opts);
       if (r.ok && r.action === 'filled') {
-        report.filled++;
+        report.filled++; lastFilledEl = field.el;
         highlight(field.el, 'af-highlight-ok');
         memPush(sel, fieldKey);
         // 填充后生效校验: 文本类字段声明成功但值未真正写入 → 标记"未生效"
@@ -305,7 +302,7 @@
           } catch (e) { /* ignore */ }
           return false;
         })();
-        const valOk = curVal === String(origValue) || curVal.startsWith(String(origValue)) || (inDateComp && !!curVal);
+        const valOk = curVal === String(origValue) || curVal.startsWith(String(origValue)) || (inDateComp);
         if ((field.type === 'text' || field.type === 'textarea') && origValue && !valOk) {
           report.notEffective = (report.notEffective || 0) + 1;
           report.unmatchedItems.push({ signature: fctx.name || fctx.id || label, label, reason: '已填充但值未生效(框架限制)' });
@@ -336,6 +333,14 @@
     }
 
     if (total > 3) closeProgress();
+
+    // 填充自动滚动跟随: 填充过程不滚动(避免虚拟列表重渲染干扰), 完成后统一滚动到最后一个填充/未匹配字段
+    if ((!opts || opts.autoScroll !== false) && total > 1) {
+      const lastEl = lastFilledEl || (unmatchedEls.length ? unmatchedEls[unmatchedEls.length - 1].el : null);
+      if (lastEl) {
+        try { lastEl.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* ignore */ }
+      }
+    }
 
     return { snapshots, unmatchedEls };
   }

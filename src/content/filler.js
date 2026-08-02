@@ -292,8 +292,12 @@
         await sleep(200);
         return true;
       }
-      // 无匹配项: 保留已输入文本并关闭残留菜单
-      dismissOverlays();
+      // 无匹配项: 恢复已输入文本(值优先; 不派发 Escape, 避免误清其他字段输入, 菜单由后续点击自然关闭)
+      try {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(input, String(value));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      } catch (e) { /* ignore */ }
       return true;
     }
     // 无内部输入框: 直接尝试点击匹配项
@@ -355,6 +359,53 @@
       } catch (e) { /* ignore */ }
     });
     return checked;
+  }
+
+  // 点击打开列表并选择目标项(月/年等数字选项, MOKA sd-Select 系列)
+  async function clickListOption(trigger, want, tries) {
+    const maxTries = tries || 2;
+    for (let t = 0; t < maxTries; t++) {
+      try {
+        trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        trigger.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        // 轮询等待面板出现(列表可能异步渲染)
+        let panel = null;
+        for (let i = 0; i < 8 && !panel; i++) {
+          await sleep(250);
+          document.querySelectorAll('[class*="Dropdown-dropdown"],[class*="Select-menu"]').forEach((p) => {
+            if (panel) return;
+            const r = p.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) panel = p;
+          });
+        }
+        if (!panel) continue;
+        const items = Array.from(panel.querySelectorAll('[class*="Menu-content-item"],[class*="common-item"],[role="option"]'));
+        let hit = null;
+        for (const it of items) {
+          const tv = (it.textContent || '').trim();
+          if (tv === String(want)) { hit = it; break; }
+        }
+        if (!hit) { dismissOverlays(); continue; }
+        // 完整 pointer + mouse 事件序列(MOKA sd- 组件监听 pointerdown, 仅 mouse 事件不生效)
+        try {
+          const rc = hit.getBoundingClientRect();
+          const cx = rc.x + rc.width / 2, cy = rc.y + rc.height / 2;
+          hit.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', clientX: cx, clientY: cy }));
+          hit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
+          hit.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', clientX: cx, clientY: cy }));
+          hit.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
+          hit.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
+        } catch (e) {
+          hit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+          hit.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+          hit.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        }
+        await sleep(300);
+        return true;
+      } catch (e) { /* ignore */ }
+    }
+    return false;
   }
 
   // 年月面板日期组件(MOKA/北森 sd- 系列: 左箭头/年文本/右箭头 + 十二个月表格)
@@ -545,17 +596,39 @@
                   el2.dispatchEvent(new Event('change', { bubbles: true }));
                 } catch (e) { /* ignore */ }
               };
-              // 年/月分列输入(MOKA date_info: placeholder 年/月), 直接输入即可被接受
-              if (ph === '年' || ph === '月') {
-                const want = ph === '年' ? String(d.y) : String(d.m).replace(/^0/, '');
-                lightSet(el, want);
-                await sleep(300);
-                if (String(el.value || '') !== want) {
-                  const w2 = ph === '月' ? String(d.m).padStart(2, '0') : want;
-                  lightSet(el, w2);
-                  await sleep(250);
+              // 年/月分列输入(MOKA date_info: placeholder 年/月; 注意年 Enter 提交后 placeholder 会被清空, 需用组件位置判定)
+              let isYear = String(el.placeholder || '').trim() === '年';
+              let isMonth = String(el.placeholder || '').trim() === '月';
+              if (!isYear && !isMonth) {
+                try {
+                  const dctx = AS.matcher.buildContext(el);
+                  if (dctx.dateRange && dctx.dateRange.title) {
+                    isYear = dctx.dateRange.index % 2 === 0;
+                    isMonth = dctx.dateRange.index % 2 === 1;
+                  }
+                } catch (e) { /* ignore */ }
+              }
+              if (isYear || isMonth) {
+                const want = isYear ? String(d.y) : String(d.m).replace(/^0/, '');
+                if (isYear) {
+                  // 年: 输入 + Enter 提交(MOKA 确认交互, 已验证有效)
+                  lightSet(el, want);
+                  await sleep(300);
+                  if (String(el.value || '') !== want) {
+                    lightSet(el, want);
+                    await sleep(250);
+                  }
+                  try {
+                    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+                    el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                  } catch (e) { /* ignore */ }
+                  await sleep(400);
+                  return { ok: true, action: 'filled', detail: '年月组件输入完成(年Enter)' };
                 }
-                return { ok: true, action: 'filled', detail: '年月组件输入完成' };
+                // 月: 点击打开列表选择 1-12(输入或 Enter 会触发"暂无选项", 必须点选)
+                const okList = await clickListOption(el, want, 3);
+                if (okList) return { ok: true, action: 'filled', detail: '月列表选择完成' };
+                return { ok: true, action: 'filled', detail: '月列表选择未确认' };
               }
               const ym = AS.dates.formatDate(d, 'yyyy-mm');
               lightSet(el, ym);
