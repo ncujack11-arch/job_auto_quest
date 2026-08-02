@@ -27,10 +27,16 @@
 
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-  // 核心: 绕过框架的 value 写入
+  // 核心: 绕过框架的 value 写入(兼容 React 受控组件)
   function setNativeValue(el, value) {
     const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+    // React 17+: 同步 value tracker, 欺骗 React 认为值由用户输入产生(onChange 才会触发)
+    try {
+      if (el._valueTracker && typeof el._valueTracker.setValue === 'function') {
+        el._valueTracker.setValue(String(el.value));
+      }
+    } catch (e) { /* ignore */ }
     setter.call(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));

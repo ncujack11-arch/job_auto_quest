@@ -756,6 +756,34 @@
     } catch (e) { /* ignore */ }
   }
 
+  // ---------- 页面诊断: 收集当前表单 DOM 结构摘要(排障用) ----------
+  function collectDiagnostic() {
+    let fields = [];
+    try { fields = AS.scanner.scan(); } catch (e) { /* ignore */ }
+    const samples = fields.slice(0, 12).map((f) => {
+      let ctx = null;
+      try { ctx = AS.matcher.buildContext(f.el); } catch (e) { /* ignore */ }
+      const el = f.el;
+      return {
+        tag: el.tagName ? el.tagName.toLowerCase() : '?',
+        type: el.type || '',
+        name: String(el.name || '').slice(0, 30),
+        id: String(el.id || '').slice(0, 30),
+        ph: String(el.placeholder || '').slice(0, 30),
+        cls: String((el.className || '').toString() || '').slice(0, 60),
+        label: ctx ? String(ctx.labelText || '').slice(0, 20) : '',
+        row: ctx ? String(ctx.rowText || '').slice(0, 30) : '',
+        prev: ctx ? String(ctx.prevText || '').slice(0, 16) : '',
+      };
+    });
+    return {
+      frame: frameLabel(),
+      href: location.href.slice(0, 140),
+      total: fields.length,
+      sample: samples,
+    };
+  }
+
   // ---------- 消息路由 ----------
   // 注意: 内容脚本的所有响应均为同步 sendResponse, 即发即弃消息(AF_FILL 等)不返回 true,
   // 否则多 frame 页面每个 frame 都保持消息通道, SPA 切换/iframe 销毁时触发
@@ -817,6 +845,14 @@
       case 'AF_FILL_SUMMARY':
         if (window.top === window && msg.summary) {
           AS.overlay.showSummary(msg.summary);
+        }
+        break;
+      case 'AF_DIAGNOSTIC':
+        chrome.runtime.sendMessage({ type: 'AF_DIAG_RESULT', data: collectDiagnostic() }).catch(() => {});
+        break;
+      case 'AF_DIAG_SHOW':
+        if (window.top === window && msg.text) {
+          AS.overlay.showDiagnostic(msg.text);
         }
         break;
       default:

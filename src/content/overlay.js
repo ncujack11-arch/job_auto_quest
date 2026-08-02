@@ -614,6 +614,31 @@
     return panel;
   }
 
+  // ---------- 页面诊断结果展示 ----------
+  function showDiagnostic(text) {
+    const panel = showPanel(h('div', {}, [
+      head('页面诊断报告', h('button', { class: 'af-close', text: '×', onclick: closePanel })),
+      h('div', { class: 'af-body' }, [
+        h('p', { style: 'font-size:12px;color:#6b7280;margin-bottom:8px', text: '以下为当前页面的表单结构摘要, 复制后发送给开发者可快速定位填充问题。' }),
+        h('textarea', { id: 'af-diag', readonly: '', style: 'width:100%;height:260px;font-size:11px;font-family:monospace;white-space:pre;border:1px solid #d1d5db;border-radius:7px;padding:8px;box-sizing:border-box', text }),
+        h('div', { class: 'af-actions' }, [
+          h('button', { class: 'af-btn primary', text: '📋 复制诊断报告', onclick: async () => {
+            const ta = shadow.querySelector('#af-diag');
+            try {
+              await navigator.clipboard.writeText(ta.value);
+              toast('已复制 ✔');
+            } catch (e) {
+              ta.select();
+              document.execCommand('copy');
+              toast('已复制 ✔');
+            }
+          } }),
+        ]),
+      ]),
+    ]));
+    return panel;
+  }
+
   // ---------- 标记模式: 字段选择器 ----------
   function showFieldPicker(onDone, anchorEl) {
     const cats = AS.schema.CATEGORIES.filter((c) => c.id !== 'openQuestions');
@@ -658,7 +683,7 @@
 
   AS.overlay = {
     showSummary, showRecordPanel, showUnlockPrompt, showLearnPanel, showPreview,
-    showExperiencePicker, showFieldPicker, showProgress, closeProgress,
+    showExperiencePicker, showFieldPicker, showProgress, closeProgress, showDiagnostic,
     highlight, clearHighlights, toast, closePanel, ensureFloatBall,
   };
 })();

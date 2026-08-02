@@ -298,6 +298,24 @@ function collectLearnItems() {
 }
 let learnTabId = null;
 
+// ---------- 页面诊断: 聚合各框架 DOM 摘要 ----------
+let diagCollect = [];
+let diagTimer = null;
+function aggregateDiag(tabId) {
+  clearTimeout(diagTimer);
+  diagTimer = setTimeout(() => {
+    const parts = diagCollect;
+    diagCollect = [];
+    const text = parts.map((d) => {
+      if (!d) return '';
+      const head = `[${d.frame}] ${d.href}\n表单字段数: ${d.total}`;
+      const body = (d.sample || []).map((s) => `  <${s.tag} type=${s.type} name=${s.name} id=${s.id} ph=${s.ph} cls=${s.cls}>\n     label=${s.label} | row=${s.row} | prev=${s.prev}`).join('\n');
+      return head + (body ? '\n' + body : '');
+    }).filter(Boolean).join('\n\n');
+    chrome.tabs.sendMessage(tabId, { type: 'AF_DIAG_SHOW', text }).catch(() => {});
+  }, 900);
+}
+
 // ---------- 消息路由 ----------
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== 'object') return;
@@ -315,6 +333,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         collectLearnItems();
       }
       break;
+
+    case 'AF_DIAG_RESULT':
+      if (sender.tab) {
+        diagCollect.push(msg.data);
+        aggregateDiag(sender.tab.id);
+      }
+      break;
+
+    case 'AF_DIAGNOSTIC': {
+      getActiveTab().then((tab) => {
+        if (!tab) return;
+        ensureInjected(tab.id).then((ok) => {
+          if (ok) chrome.tabs.sendMessage(tab.id, { type: 'AF_DIAGNOSTIC' }).catch(() => {});
+        });
+      });
+      break;
+    }
 
     case 'AF_LEARN_COLLECT': {
       // 面板/弹窗请求: 转发给当前活动标签页

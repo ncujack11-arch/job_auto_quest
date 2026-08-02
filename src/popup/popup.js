@@ -155,6 +155,13 @@
       await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_SHOW_FLOAT' }).catch(() => {});
       window.close();
     });
+    $('diagBtn').addEventListener('click', async () => {
+      if (!currentTab) return;
+      const ok = await ensureContentScript();
+      if (!ok) { showStatus('error', '无法注入脚本, 请刷新页面'); return; }
+      await chrome.runtime.sendMessage({ type: 'AF_DIAGNOSTIC' }).catch(() => {});
+      window.close();
+    });
     $('manualRecord').addEventListener('click', async () => {
       if (!currentTab) return;
       try {

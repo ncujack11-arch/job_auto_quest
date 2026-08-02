@@ -81,6 +81,19 @@
       const rowText = cleanText(row.textContent, 60);
       if (rowText && !ctx.labelText.includes(rowText.slice(0, 10))) ctx.rowText = rowText;
     }
+    // 兜底: 向上找最近"合理文本容器"(MOKA/自研组件化表单, class 结构未知时也能拿到标签)
+    if (!ctx.rowText) {
+      let p = el.parentElement;
+      for (let i = 0; i < 5 && p; i++, p = p.parentElement) {
+        const tag = p.tagName;
+        if (tag === 'BODY' || tag === 'HTML' || tag === 'FORM') break;
+        const txt = cleanText(p.textContent, 50);
+        if (txt && txt.length >= 2 && txt.length <= 40 && !txt.includes(String(el.value || '').slice(0, 5))) {
+          ctx.rowText = txt;
+          break;
+        }
+      }
+    }
 
     // 前一兄弟文本
     const prev = el.previousElementSibling;
@@ -90,6 +103,16 @@
     // 上一单元格文本
     if (!ctx.prevText && el.parentElement && el.parentElement.previousElementSibling) {
       ctx.prevText = cleanText(el.parentElement.previousElementSibling.textContent, 20);
+    }
+    // 兜底: 逐层向上找前兄弟容器文本(组件化表单的 label 常在 input 容器的前兄弟内)
+    if (!ctx.prevText) {
+      let p = el.parentElement;
+      for (let i = 0; i < 3 && p; i++, p = p.parentElement) {
+        if (p.previousElementSibling) {
+          const t = cleanText(p.previousElementSibling.textContent, 16);
+          if (t && t.length >= 2 && t.length <= 12 && !/\d{6,}/.test(t)) { ctx.prevText = t; break; }
+        }
+      }
     }
 
     // 可见性
