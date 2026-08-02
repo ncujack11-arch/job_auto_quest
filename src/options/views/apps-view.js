@@ -14,6 +14,7 @@
   let selected = new Set();
   let containerRef = null;
   let editingId = null;
+  let groupMode = false; // 按公司归组视图
 
   const STATUS_COLOR = {
     '待笔试': 'pill warn', '笔试中': 'pill warn', '一面': 'pill primary', '二面': 'pill primary',
@@ -89,6 +90,10 @@
     bar.appendChild(tagSel);
 
     bar.appendChild(UI().el('button', { class: 'btn primary', text: '＋ 新增投递', onclick: () => openDetail(null) }));
+    bar.appendChild(UI().el('button', {
+      class: 'btn' + (groupMode ? ' primary' : ''), text: groupMode ? '🏢 按公司分组' : '📋 平铺列表',
+      onclick: () => { groupMode = !groupMode; renderAll(); },
+    }));
     bar.appendChild(UI().el('button', { class: 'btn', text: '📥 批量导入', onclick: () => openImport() }));
     bar.appendChild(UI().el('button', {
       class: 'btn', text: '📤 导出 CSV', onclick: () => {
@@ -322,13 +327,86 @@
     renderBatchBar();
   }
 
+  // ---------- 按公司归组视图 ----------
+  function renderGrouped() {
+    const wrap = document.getElementById('tableWrap');
+    const list = filtered().sort((a, b) => appliedTime(b) - appliedTime(a));
+    wrap.innerHTML = '';
+    if (!list.length) {
+      wrap.appendChild(UI().el('div', { class: 'empty' }, [
+        UI().el('b', { text: '暂无投递记录' }),
+        UI().el('span', { text: '填充后提交成功会自动弹出记录面板, 也可点击「新增投递」手动添加' }),
+      ]));
+      return;
+    }
+    const byCompany = {};
+    list.forEach((r) => {
+      const key = r.company || '未知公司';
+      byCompany[key] = byCompany[key] || [];
+      byCompany[key].push(r);
+    });
+    const companies = Object.entries(byCompany).sort((a, b) => b[1].length - a[1].length || (b[1][0] && appliedTime(b[1][0]) - appliedTime(a[1][0])));
+
+    companies.forEach(([company, apps]) => {
+      const card = UI().el('div', { class: 'card', style: 'padding:14px 16px' });
+      const head = UI().el('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:10px' });
+      head.appendChild(UI().el('b', { style: 'font-size:14px', text: company }));
+      head.appendChild(UI().el('span', { class: 'badge', text: `${apps.length} 个岗位` }));
+      const statusCount = {};
+      apps.forEach((a) => { statusCount[a.status] = (statusCount[a.status] || 0) + 1; });
+      Object.entries(statusCount).forEach(([s, n]) => {
+        const cls = STATUS_COLOR[s] || 'pill muted';
+        head.appendChild(UI().el('span', { class: cls, style: 'font-size:11px', text: `${s}×${n}` }));
+      });
+      head.appendChild(UI().el('span', { style: 'flex:1' }));
+      head.appendChild(UI().el('button', {
+        class: 'link-btn danger', text: '删除整组', onclick: async () => {
+          if (!confirm(`删除 ${company} 的 ${apps.length} 条投递记录?`)) return;
+          await AS.storage.removeApplications(apps.map((a) => a.id));
+          await removeRemindersFor(apps.map((a) => a.id));
+          await reload(); renderAll();
+        },
+      }));
+      card.appendChild(head);
+
+      apps.forEach((app) => {
+        const row = UI().el('div', { style: 'display:flex;align-items:center;gap:10px;padding:7px 8px;border-top:1px solid #f1f5f9;font-size:13px' });
+        row.appendChild(UI().el('span', { style: 'flex:1;font-weight:500', text: app.position }));
+        row.appendChild(UI().el('span', { style: 'width:70px;color:#6b7280;font-size:12px', text: app.city || '-' }));
+        row.appendChild(UI().el('span', { style: 'width:110px', text: (() => {
+          const sel = UI().el('select', { style: 'padding:2px 6px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px' });
+          statusFlow.forEach((s) => sel.appendChild(UI().el('option', { value: s, text: s })));
+          sel.value = app.status;
+          sel.addEventListener('change', async () => {
+            await AS.apps.setStatus(app.id, sel.value);
+            await reload(); renderAll();
+          });
+          return sel;
+        })() }));
+        row.appendChild(UI().el('span', { style: 'width:150px;color:#9ca3af;font-size:12px', text: fmtTime(appliedTime(app)) }));
+        row.appendChild(UI().el('span', { style: 'width:80px', text: (app.salary || '') } ));
+        row.appendChild(UI().el('button', { class: 'link-btn', text: '详情', onclick: () => openDetail(app.id) }));
+        row.appendChild(UI().el('button', {
+          class: 'link-btn danger', text: '删', onclick: async () => {
+            await AS.storage.removeApplications([app.id]);
+            await removeRemindersFor([app.id]);
+            await reload(); renderAll();
+          },
+        }));
+        card.appendChild(row);
+      });
+      wrap.appendChild(card);
+    });
+  }
+
   function renderAll() {
     if (!containerRef) return;
     containerRef.innerHTML = '';
     containerRef.appendChild(renderToolbar());
     containerRef.appendChild(renderBatchBar());
     containerRef.appendChild(UI().el('div', { id: 'tableWrap' }));
-    renderTable();
+    if (groupMode) renderGrouped();
+    else renderTable();
   }
 
   // ---------- 详情弹窗 ----------

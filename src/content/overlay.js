@@ -207,6 +207,7 @@
       mk('position', '岗位名称', f.position, '如: 前端开发工程师'),
       mk('category', '岗位类别', f.category, '如: 技术类 / 非技术类'),
       mk('city', '工作城市', f.city, '如: 杭州'),
+      mk('salary', '薪资待遇', f.salary, '如: 15-25K (自动提取)'),
       mk('channel', '投递渠道', f.channel || f.siteName, '如: 官网 / 牛客网 / 内推'),
       h('div', { class: 'af-row' }, [
         h('label', { text: '岗位链接' }),
@@ -234,7 +235,7 @@
               company: g('company') || '未知公司',
               position: g('position') || '未知岗位',
               category: g('category'), city: g('city'), channel: g('channel'),
-              url: g('url'), jdSnapshot: g('jd'), fromPage: true,
+              url: g('url'), jdSnapshot: g('jd'), salary: g('salary'), fromPage: true,
             };
             const note = g('note');
             if (note) record.notes = { content: note };

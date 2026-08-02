@@ -244,11 +244,21 @@
   }
 
   // 开放题匹配: 在开放题库中找与表单字段语义最接近的问题答案
+  // 场景标签加权: 答案带 tags(如 公司认知/职业规划/自我介绍)时按表单场景加权
+  const OPEN_SCENES = [
+    { kw: ['公司', '贵司', '贵公司', '加入我们', '选择我们', '本公司'], tag: '公司认知' },
+    { kw: ['规划', '发展', '未来'], tag: '职业规划' },
+    { kw: ['介绍', '评价', '描述', '自我介绍'], tag: '自我介绍' },
+    { kw: ['缺点', '优点', '优势', '劣势'], tag: '优缺点' },
+    { kw: ['行为', '宝洁', '团队', '冲突', '领导力', '困难'], tag: '行为面' },
+  ];
   function resolveOpenQuestion(profile, text) {
     if (!profile || !profile.data || !Array.isArray(profile.data.openQuestions)) return null;
     const fz = FUZZY();
     const nt = fz.normalize(text);
     if (!nt) return null;
+    // 命中场景 → 期望标签
+    const scene = OPEN_SCENES.find((s) => s.kw.some((k) => fz.normalize(k) && (nt.includes(fz.normalize(k)) || fz.normalize(k).includes(nt))));
     let best = null;
     profile.data.openQuestions.forEach((q, idx) => {
       if (!q || !q.answer) return;
@@ -259,6 +269,8 @@
       // 模板关键词兜底
       const tpl = SCHEMA().OPEN_TEMPLATES.find((t) => t.kw.some((k) => fz.normalize(k) && (nt.includes(fz.normalize(k)) || fz.normalize(k).includes(nt))));
       if (tpl && !nq) score = Math.max(score, 0.7);
+      // 场景标签加权
+      if (scene && (q.tags || []).includes(scene.tag)) score += 0.15;
       if (score > 0.55 && (!best || score > best.score)) best = { index: idx, answer: q.answer, score };
     });
     return best ? best.answer : null;

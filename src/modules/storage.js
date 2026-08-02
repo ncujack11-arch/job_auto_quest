@@ -33,11 +33,28 @@
     autoNext: false,             // 多页表单自动下一步续填(默认关, 绝不自动提交)
     photoDataUrl: '',            // 证件照 dataURL(可选, 用于自动上传)
     refCodes: [],                // 内推码库 [{host, code}]
+    autoLock: true,              // 闲置 5 分钟自动锁定(清除会话密钥)
     logLevel: 'info',
     encryption: { enabled: false, salt: '', iterations: 100000, passwordHash: '', hint: '' },
   };
 
   const DEFAULT_STATUS_FLOW = ['待笔试', '笔试中', '一面', '二面', '终面', 'HR面', 'OC', 'Offer', '已回绝', '流程终止'];
+
+  // 核心内容脚本清单(与 manifest content_scripts 一致, 动态兜底注入用)
+  const CORE_CONTENT_SCRIPTS = [
+    'src/utils/logger.js',
+    'src/modules/schema.js',
+    'src/modules/storage.js',
+    'src/utils/fuzzy.js',
+    'src/utils/dates.js',
+    'src/utils/matcher.js',
+    'src/content/scanner.js',
+    'src/content/filler.js',
+    'src/content/overlay.js',
+    'src/content/detect.js',
+    'src/content/quiz.js',
+    'src/content/content.js',
+  ];
 
   // 内置站点规则: 主流网申系统
   const BUILTIN_RULES = [
@@ -370,6 +387,29 @@
     return !dup;
   }
 
+  // ---------- 网申避坑提示库 ----------
+  const BUILTIN_TIPS = {
+    'nowcoder.com': ['牛客网笔试请用独立浏览器窗口, 避免切屏被判定作弊'],
+    'zhaopin.com': ['智联招聘按简历完善度筛选, 填充后请核对必填项再提交'],
+    'beisen.com': ['北森系统部分页面切换后会清空未保存内容, 建议每步填写完成后再切页'],
+    'shixiseng.com': ['实习僧投递前请确认简历附件已上传'],
+    '51job.com': ['前程无忧请确认期望薪资与在职状态填写一致, 避免影响推送'],
+  };
+  async function getSiteTips() {
+    const t = await get('af_site_tips', null);
+    if (t === null || t === undefined) { await set('af_site_tips', JSON.parse(JSON.stringify(BUILTIN_TIPS))); return BUILTIN_TIPS; }
+    return t;
+  }
+  async function saveSiteTips(map) { await set('af_site_tips', map || {}); }
+  async function getTipsForHost(host) {
+    const map = await getSiteTips();
+    const h = String(host || '').toLowerCase();
+    for (const [key, tips] of Object.entries(map)) {
+      if (h === key.toLowerCase() || h.endsWith('.' + key.toLowerCase())) return tips || [];
+    }
+    return [];
+  }
+
   // ---------- 备份 / 恢复 ----------
   async function exportAll() {
     return {
@@ -405,7 +445,7 @@
   }
 
   AS.storage = {
-    KEYS, DEFAULT_SETTINGS, DEFAULT_STATUS_FLOW, BUILTIN_RULES,
+    KEYS, DEFAULT_SETTINGS, DEFAULT_STATUS_FLOW, BUILTIN_RULES, CORE_CONTENT_SCRIPTS,
     get, set,
     getSettings, saveSettings,
     getProfiles, saveProfiles, getProfile, getActiveProfile, saveProfile, deleteProfile,
@@ -417,6 +457,7 @@
     getSiteMemories, saveSiteMemories, getMemoriesForHost, addMemory, clearMemoriesForHost, countMemories,
     appendLog, getLogs, clearLogs,
     getQuiz, saveQuiz, addQuizItem,
+    BUILTIN_TIPS, getSiteTips, saveSiteTips, getTipsForHost,
     exportAll, importAll, clearAll,
   };
 })();

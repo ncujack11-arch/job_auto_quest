@@ -85,7 +85,37 @@
     chartIndustry.appendChild(UI().el('canvas', { height: '220' }));
     grid.appendChild(chartIndustry);
 
+    const chartSalary = UI().el('div', { class: 'chart-card' });
+    chartSalary.appendChild(UI().el('h4', { text: '薪资分布(岗位待遇)' }));
+    chartSalary.appendChild(UI().el('canvas', { height: '220' }));
+    grid.appendChild(chartSalary);
+
     container.appendChild(grid);
+
+    // 时间线视图
+    const tlCard = UI().el('div', { class: 'card', style: 'margin-top:16px' });
+    tlCard.appendChild(UI().el('h3', { text: '🗓 秋招时间线(全部投递/笔试/面试节点)' }));
+    const tlWrap = UI().el('div', { style: 'margin-top:10px' });
+    const TYPE_COLOR = { '投递': '#2563eb', '笔试通知': '#d97706', '笔试': '#d97706', '一面': '#0891b2', '二面': '#0891b2', '终面': '#0891b2', 'HR面': '#7c3aed', 'OC': '#16a34a', 'Offer': '#16a34a', '拒信': '#dc2626', '状态变更': '#64748b' };
+    const fmt = (ts) => {
+      const d = new Date(ts);
+      return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    };
+    s.timeline.forEach((e) => {
+      const row = UI().el('div', { style: 'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #f8fafc;font-size:13px' });
+      row.appendChild(UI().el('span', { style: 'width:110px;color:#6b7280;font-size:12px;flex-shrink:0', text: fmt(e.time) }));
+      row.appendChild(UI().el('span', { class: 'pill', style: 'width:80px;flex-shrink:0;background:#f1f5f9;color:' + (TYPE_COLOR[e.type] || '#475569'), text: e.type }));
+      row.appendChild(UI().el('span', { style: 'flex:1;color:#374151', text: `${e.company || ''} ${e.position || ''}${e.note ? ' — ' + e.note : ''}` }));
+      row.appendChild(UI().el('button', {
+        class: 'link-btn', text: '查看', onclick: () => {
+          location.hash = '#/applications?focus=' + e.appId;
+        },
+      }));
+      tlWrap.appendChild(row);
+    });
+    if (!s.timeline.length) tlWrap.appendChild(UI().el('div', { style: 'color:#9ca3af;font-size:13px;padding:10px', text: '暂无节点, 记录投递后自动生成' }));
+    tlCard.appendChild(tlWrap);
+    container.appendChild(tlCard);
 
     // 渲染图表(下一帧等布局完成)
     requestAnimationFrame(() => {
@@ -112,6 +142,9 @@
 
         const indData = { labels: s.byIndustry.map(([k]) => k), values: s.byIndustry.map(([, v]) => v) };
         AS.charts.drawBars(chartIndustry.querySelector('canvas'), Object.assign({ horizontal: true }, indData));
+
+        const salData = { labels: s.salaryDist.map(([k]) => k), values: s.salaryDist.map(([, v]) => v) };
+        AS.charts.drawBars(chartSalary.querySelector('canvas'), Object.assign({ colors: ['#dc2626', '#d97706', '#16a34a', '#2563eb', '#9ca3af'] }, salData));
       } catch (e) {
         AS.logger.error('stats', 'chart render failed', e);
       }

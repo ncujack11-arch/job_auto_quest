@@ -102,9 +102,42 @@
     cSel.value = catOf(q);
     cSel.addEventListener('change', (e) => { q.category = e.target.value; });
     item3.appendChild(cSel);
+
+    // 一键微调: 占位符 {{公司}} / {{岗位}} 替换生成针对性答案
+    const tplBox = UI().el('div', { class: 'card', style: 'margin-top:12px;background:#f8fafc;padding:12px' });
+    tplBox.appendChild(UI().el('b', { style: 'font-size:13px', text: '🪄 一键微调(答案中可写 {{公司}} / {{岗位}} 占位符, 填写后生成针对性版本)' }));
+    const tplRow = UI().el('div', { class: 'form-grid', style: 'margin-top:8px' });
+    const companyI = UI().el('input', { type: 'text', placeholder: '公司名(如 腾讯)', style: 'padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px' });
+    const posI = UI().el('input', { type: 'text', placeholder: '岗位方向(如 前端开发)', style: 'padding:6px 10px;border:1px solid #e2e8f0;border-radius:8px' });
+    tplRow.appendChild(UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '公司名' }), companyI]));
+    tplRow.appendChild(UI().el('div', { class: 'form-item' }, [UI().el('label', { text: '岗位方向' }), posI]));
+    tplBox.appendChild(tplRow);
+    tplBox.appendChild(UI().el('button', {
+      class: 'btn sm', style: 'margin-top:10px', text: '生成针对性答案并保存为新条目', onclick: async () => {
+        if (!q.question || !q.answer) return UI().toast('请先填写问题与答案', 'error');
+        let answer = q.answer;
+        const company = companyI.value.trim();
+        const position = posI.value.trim();
+        if (company) answer = answer.split('{{公司}}').join(company);
+        if (position) answer = answer.split('{{岗位}}').join(position);
+        if (answer === q.answer && !company && !position) return UI().toast('请填写公司名或岗位方向', 'error');
+        const copy = {
+          question: q.question + (company ? `（${company}${position ? '·' + position : ''}）` : ''),
+          answer,
+          category: company || q.category || '通用',
+          tags: [...(q.tags || []), company].filter(Boolean),
+        };
+        list.push(copy);
+        await save();
+        UI().toast('已生成并保存针对性答案', 'success');
+        render(containerRef);
+        modal.remove();
+      },
+    }));
     box.appendChild(item1);
     box.appendChild(item2);
     box.appendChild(item3);
+    box.appendChild(tplBox);
     box.appendChild(UI().el('div', { class: 'modal-foot' }, [
       UI().el('button', { class: 'btn', text: '取消', onclick: () => modal.remove() }),
       UI().el('button', {

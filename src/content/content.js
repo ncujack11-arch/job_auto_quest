@@ -490,6 +490,15 @@
     if (cityMatch) city = cityMatch[1].trim();
     if (!city) pending = true;
 
+    // 薪资(从页面文本/标题提取, 如 15-25K / 20k-30k / 年薪 30万)
+    let salary = '';
+    const salM = bodyText.match(/(?:薪资|薪酬|待遇|工资)\s*(?:范围|待遇|区间)?\s*[:：]?\s*(\d{1,3}\s*[Kk万Ww]\s*[-—~至到]\s*\d{1,3}\s*[Kk万Ww]|\d{1,3}\s*[Kk万Ww]|\d{4,6}\s*[-—~至到]\s*\d{4,6})/);
+    if (salM) salary = salM[1].replace(/\s+/g, '').slice(0, 30);
+    if (!salary) {
+      const tM = (doc.title || '').match(/(\d{1,3}[Kk万Ww][-—~至到]?\d{0,3}[Kk万Ww]?)/);
+      if (tM) salary = tM[1];
+    }
+
     // JD 快照
     let jd = '';
     const jdSelectors = ['#job-desc', '#jobDescription', '.job-desc', '.job-description', '.job-detail', '.job_detail', '.position-desc', '.position_detail', '.describtion', '.description', '[class*="job-desc"]', '[class*="job_detail"]', '[class*="position-desc"]'];
@@ -515,6 +524,7 @@
       company: company.slice(0, 60),
       position: position.slice(0, 80),
       city: city.slice(0, 40),
+      salary,
       channel,
       url: location.href,
       title,

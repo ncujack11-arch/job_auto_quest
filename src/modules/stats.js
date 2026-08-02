@@ -68,12 +68,53 @@
       return Object.entries(m).sort((a, b) => b[1] - a[1]);
     })();
 
+    // 薪资分布(解析 "15-25K" "20k-30k" "30K" "年薪30万" 等)
+    const salaryDist = (() => {
+      const buckets = { '10K以下': 0, '10-20K': 0, '20-30K': 0, '30K以上': 0, '未知': 0 };
+      const parseK = (s) => {
+        const t = String(s || '');
+        let k = null;
+        const m = t.match(/(\d+(?:\.\d+)?)\s*[Kk万]/);
+        if (m) k = t.includes('万') ? parseFloat(m[1]) * 10 : parseFloat(m[1]);
+        return k;
+      };
+      records.forEach((r) => {
+        const k = parseK(r.salary);
+        if (k === null) { buckets['未知']++; return; }
+        if (k < 10) buckets['10K以下']++;
+        else if (k < 20) buckets['10-20K']++;
+        else if (k < 30) buckets['20-30K']++;
+        else buckets['30K以上']++;
+      });
+      return Object.entries(buckets);
+    })();
+
+    // 时间线: 全部记录的事件按时间排序
+    const timeline = (() => {
+      const events = [];
+      records.forEach((r) => {
+        (r.timeline || []).forEach((e) => {
+          if (!e.time) return;
+          events.push({
+            time: e.time,
+            type: e.type || '事件',
+            note: e.note || '',
+            company: r.company,
+            position: r.position,
+            appId: r.id,
+          });
+        });
+      });
+      return events.sort((a, b) => a.time - b.time);
+    })();
+
     return {
       total, offers, rejects, terminated, inProcess, written, interviews,
       applyRate: total ? Math.round((written / total) * 100) : 0,
       writtenRate: written ? Math.round((interviews / written) * 100) : 0,
       interviewRate: interviews ? Math.round((offers / interviews) * 100) : 0,
       byStatus, byChannel, byCategory, byIndustry, trendDaily, failureStages,
+      salaryDist, timeline,
     };
   }
 

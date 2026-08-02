@@ -79,34 +79,95 @@ function ensureMenus() {
 chrome.runtime.onInstalled.addListener((details) => {
   ensureMenus();
   init();
-  // 更新/安装时自动备份全量数据, 防止意外丢失(保留最近 5 份快照)
+  ensureKeepalive();
+  // 更新/安装时自动备份全量数据, 防止意外丢失(保留最近 7 份快照)
   autoBackup(details);
 });
 chrome.runtime.onStartup.addListener(() => {
   ensureMenus();
   init();
+  ensureKeepalive();
 });
 
 // ---------- 数据自保: 版本更新自动备份 ----------
-async function autoBackup(details) {
-  try {
-    const data = await AS.storage.exportAll();
-    const key = 'af_auto_backups';
-    const r = await chrome.storage.local.get(key);
-    const backups = (r && r[key]) || [];
-    backups.push({
-      at: Date.now(),
-      fromVersion: (details && details.previousVersion) || 'unknown',
-      toVersion: chrome.runtime.getManifest().version,
-      reason: (details && details.reason) || 'update',
-      data,
-    });
-    while (backups.length > 5) backups.shift();
-    await chrome.storage.local.set({ [key]: backups });
-    LOG.info('bg', 'auto backup saved', backups.length, 'snapshots');
-  } catch (e) {
-    LOG.warn('bg', 'auto backup failed', e);
+  async function autoBackup(details) {
+    try {
+      const data = await AS.storage.exportAll();
+      const key = 'af_auto_backups';
+      const r = await chrome.storage.local.get(key);
+      const backups = (r && r[key]) || [];
+      backups.push({
+        at: Date.now(),
+        fromVersion: (details && details.previousVersion) || 'unknown',
+        toVersion: chrome.runtime.getManifest().version,
+        reason: (details && details.reason) || 'update',
+        data,
+      });
+      while (backups.length > 7) backups.shift();
+      await chrome.storage.local.set({ [key]: backups });
+      LOG.info('bg', 'auto backup saved', backups.length, 'snapshots');
+    } catch (e) {
+      LOG.warn('bg', 'auto backup failed', e);
+    }
   }
+
+// ---------- 保活 / 自动锁定 / 每日备份 ----------
+let lastActive = Date.now();
+const LOCK_IDLE_MS = 5 * 60 * 1000; // 闲置 5 分钟自动锁定
+
+function ensureKeepalive() {
+  chrome.alarms.create('af_keepalive', { periodInMinutes: 4 }).catch(() => {});
+}
+
+async function keepaliveTick() {
+  try {
+    // 每日自动备份(保留 7 份)
+    const today = new Date().toISOString().slice(0, 10);
+    const r = await chrome.storage.local.get('af_last_backup_date');
+    if (r.af_last_backup_date !== today) {
+      await autoBackup({ reason: 'daily' });
+      await chrome.storage.local.set({ af_last_backup_date: today });
+    }
+    // 闲置自动锁定
+    const settings = await AS.storage.getSettings();
+    if (settings.autoLock !== false && settings.encryption && settings.encryption.enabled && AS.encrypt.hasKey()) {
+      if (Date.now() - lastActive > LOCK_IDLE_MS) {
+        AS.encrypt.clearSessionKey();
+        chrome.notifications.create('af_autolock', {
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('src/assets/icons/icon128.png'),
+          title: '秋招网申自动填充',
+          message: '已闲置 5 分钟, 敏感字段已自动锁定, 再次填充敏感字段前需输入解锁口令。',
+          priority: 2,
+        }, () => {});
+        LOG.info('bg', 'auto locked after idle');
+      }
+    }
+  } catch (e) {
+    LOG.warn('bg', 'keepalive tick failed', e);
+  }
+}
+
+// ---------- 笔试倒计时 ----------
+function startCountdown(minutes) {
+  const end = Date.now() + minutes * 60 * 1000;
+  const name = 'countdown_' + end;
+  chrome.alarms.create(name + '_end', { when: end });
+  const t15 = end - 15 * 60 * 1000;
+  const t5 = end - 5 * 60 * 1000;
+  if (t15 > Date.now()) chrome.alarms.create(name + '_15', { when: t15 });
+  if (t5 > Date.now()) chrome.alarms.create(name + '_5', { when: t5 });
+  return new Date(end).toLocaleTimeString('zh-CN');
+}
+
+function notifyCountdown(label, minutes) {
+  chrome.notifications.create('af_countdown_' + Date.now(), {
+    type: 'basic',
+    iconUrl: chrome.runtime.getURL('src/assets/icons/icon128.png'),
+    title: '⏱ 笔试倒计时',
+    message: label + (minutes !== undefined ? `, 剩余 ${minutes} 分钟` : ''),
+    priority: 2,
+  }, () => {});
 }
 
 // ---------- 工具 ----------
@@ -119,23 +180,7 @@ function isHttpTab(tab) {
   return tab && /^https?:\/\//.test(tab.url || '');
 }
 
-// 核心内容脚本清单(与 manifest content_scripts 一致, 用于兜底注入)
-const CORE_CONTENT_SCRIPTS = [
-  'src/utils/logger.js',
-  'src/modules/schema.js',
-  'src/modules/storage.js',
-  'src/utils/fuzzy.js',
-  'src/utils/dates.js',
-  'src/utils/matcher.js',
-  'src/content/scanner.js',
-  'src/content/filler.js',
-  'src/content/overlay.js',
-  'src/content/detect.js',
-  'src/content/quiz.js',
-  'src/content/content.js',
-];
-
-// 探测内容脚本是否已注入; 未注入则用 scripting 兜底注入
+// 探测内容脚本是否已注入; 未注入则用 scripting 兜底注入(注入所有 frame, 兼容 iframe 表单)
 // (popup 打开 / 右键菜单点击时 activeTab 已授权; 快捷键场景可能无权限, 返回 false)
 async function ensureInjected(tabId) {
   try {
@@ -145,8 +190,8 @@ async function ensureInjected(tabId) {
     LOG.info('bg', 'content script not injected, fallback injecting...', tabId);
     try {
       await chrome.scripting.executeScript({
-        target: { tabId },
-        files: CORE_CONTENT_SCRIPTS,
+        target: { tabId, allFrames: true },
+        files: AS.storage.CORE_CONTENT_SCRIPTS,
       });
       return true;
     } catch (e2) {
@@ -283,9 +328,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
 
     case 'AF_ENSURE_INJECTED': {
-      getActiveTab().then((tab) => {
-        if (!tab || !isHttpTab(tab)) return sendResponse({ ok: false });
-        ensureInjected(tab.id).then((ok) => sendResponse({ ok }));
+      Promise.resolve().then(async () => {
+        try {
+          const tab = await getActiveTab();
+          if (!tab || !isHttpTab(tab)) return sendResponse({ ok: false });
+          const ok = await ensureInjected(tab.id);
+          sendResponse({ ok });
+        } catch (err) {
+          LOG.warn('bg', 'ensure injected error', err);
+          try { sendResponse({ ok: false, error: err.message }); } catch (e2) { /* 通道已关 */ }
+        }
       });
       return true;
     }
@@ -461,9 +513,21 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// ---------- 本地提醒 ----------
+// ---------- 本地提醒 / 保活 / 倒计时 ----------
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (!alarm || !alarm.name || !alarm.name.startsWith('reminder_')) return;
+  if (!alarm || !alarm.name) return;
+  if (alarm.name === 'af_keepalive') {
+    keepaliveTick();
+    return;
+  }
+  if (alarm.name.startsWith('countdown_')) {
+    const suffix = alarm.name.slice(-3);
+    if (suffix === '_15') notifyCountdown('笔试即将开始', 15);
+    else if (suffix === '_5') notifyCountdown('笔试即将开始', 5);
+    else notifyCountdown('笔试时间到, 请立即进入答题', undefined);
+    return;
+  }
+  if (!alarm.name.startsWith('reminder_')) return;
   const id = alarm.name.slice('reminder_'.length);
   const [reminders, applications] = await Promise.all([AS.storage.getReminders(), AS.storage.getApplications()]);
   const reminder = reminders.find((r) => r.id === id);

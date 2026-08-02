@@ -11,7 +11,11 @@
   async function init() {
     await loadProfiles();
     await loadSite();
-    await scanCount();
+    // 确保注入后扫描字段数(popup 打开即获得 activeTab 授权)
+    if (currentTab) {
+      const ok = await ensureContentScript();
+      if (ok) await scanCount();
+    }
     bindEvents();
   }
 
@@ -70,6 +74,24 @@
     } catch (e) { /* 内容脚本未注入 */ }
   }
 
+  // 本地确保内容脚本已注入(popup 打开时 activeTab 已授权, 不依赖后台消息通道)
+  async function ensureContentScript() {
+    try {
+      await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_PING' });
+      return true;
+    } catch (e) {
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: currentTab.id, allFrames: true },
+          files: AS.storage.CORE_CONTENT_SCRIPTS,
+        });
+        return true;
+      } catch (e2) {
+        return false;
+      }
+    }
+  }
+
   async function fill() {
     if (!currentTab) return;
     $('fillBtn').disabled = true;
@@ -81,9 +103,9 @@
         showStatus('error', '信息库为空, 请先在配置页录入个人信息');
         return;
       }
-      // 确保内容脚本已注入(扩展更新后旧页面可能未加载新脚本, 自动兜底注入)
-      const r = await chrome.runtime.sendMessage({ type: 'AF_ENSURE_INJECTED' });
-      if (!r || !r.ok) {
+      // 确保内容脚本已注入(扩展更新后旧页面可能未加载新脚本, 本地兜底注入)
+      const ok = await ensureContentScript();
+      if (!ok) {
         showStatus('error', '无法注入脚本, 请刷新当前页面后重试');
         return;
       }
