@@ -161,6 +161,43 @@
     container.innerHTML = '';
     rules = await AS.storage.getSiteRules();
 
+    // ---------- 使用说明 ----------
+    const helpCard = UI().el('div', { class: 'card', style: 'background:#f8fafc' });
+    const helpHead = UI().el('div', { style: 'display:flex;align-items:center;justify-content:space-between;cursor:pointer' });
+    helpHead.appendChild(UI().el('h3', { style: 'margin:0', text: '❓ 站点规则是什么? 怎么用?' }));
+    const toggleBtn = UI().el('span', { text: '展开 ▾', style: 'color:#2563eb;font-size:13px' });
+    helpHead.appendChild(toggleBtn);
+    const helpBody = UI().el('div', { style: 'display:none;margin-top:12px;line-height:2;font-size:13px;color:#334155' });
+    helpBody.appendChild(UI().el('div', { html: `
+      <b>一、这是什么?</b><br>
+      每个网申网站的表单字段命名各不相同(比如有的网站用 <code>mobile</code>、有的用 <code>telephone</code>、有的写「联系电话」)。
+      插件自动识别字段时靠"猜"(关键词匹配), 个别小众网站会猜不准。站点规则就是把某个网站的字段和你的信息库字段<u>绑定死</u>,
+      绑定后该网站 100% 填对, 不再靠猜。<br><br>
+      <b>二、什么情况下需要手动添加?</b><br>
+      ① 填充结果显示"未匹配"的字段较多; ② 某些字段每次都被填错位置; ③ 小众/自研网申系统。<br><br>
+      <b>三、三步使用流程</b><br>
+      1. 在网申页面点击「一键填充」→ 页面右下角弹出结果统计;<br>
+      2. 看到未匹配字段 → 点击「手动映射未匹配字段」(会自动带出当前站点域名);<br>
+      3. 在该站点规则下点击「＋ 添加映射行」: 左侧填页面元素的 name / id / 或 label 文字(比如 <code>mobile</code> 或 <code>手机号码</code>),
+      右侧下拉选择对应的信息库字段(如「手机号」)。保存后再次访问该站点自动生效。<br><br>
+      <b>四、快速找字段签名的小技巧</b><br>
+      在网申页面按 F12 打开开发者工具 → Elements 面板 → 点击左上角选择箭头 → 点选页面上的输入框,
+      看高亮元素的名字属性(<code>&lt;input name="xxx"&gt;</code>), 那个 <code>xxx</code> 就是签名(支持模糊匹配, 填一部分也行)。<br><br>
+      <b>五、内置规则</b><br>
+      已内置 北森 / 肯耐珂萨 / 智联招聘 / 前程无忧 / 牛客网 / 实习僧 / 校招盒子 的常用字段映射, 可直接启用;
+      不同公司的网申系统可能部署在自己的域名下, 若该域名的系统是北森开发的, 可在北森规则中添加该域名为别名(或新建规则复制映射)。<br><br>
+      <b>六、规则库迁移</b><br>
+      右上角「导出规则库」可保存为 JSON 文件, 换设备后在「导入规则库」恢复;「恢复内置规则」可重置内置规则为默认。
+    ` }));
+    helpHead.addEventListener('click', () => {
+      const show = helpBody.style.display === 'none';
+      helpBody.style.display = show ? 'block' : 'none';
+      toggleBtn.textContent = show ? '收起 ▴' : '展开 ▾';
+    });
+    helpCard.appendChild(helpHead);
+    helpCard.appendChild(helpBody);
+    container.appendChild(helpCard);
+
     const toolbar = UI().el('div', { class: 'toolbar' });
     toolbar.appendChild(UI().el('span', { style: 'font-size:13px;color:#6b7280', text: `共 ${rules.length} 条规则` }));
     toolbar.appendChild(UI().el('button', {
