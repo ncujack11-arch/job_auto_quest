@@ -75,6 +75,9 @@
         if (k === 'text') el.textContent = v;
         else if (k === 'html') el.innerHTML = v;
         else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+        else if (v === undefined || v === null) { /* 忽略空值, 防止 setAttribute(..., 'undefined') */ }
+        else if (v === false && (k === 'disabled' || k === 'readonly')) { /* 布尔属性为 false 时跳过 */ }
+        else if (v === true && (k === 'disabled' || k === 'readonly')) el.setAttribute(k, '');
         else el.setAttribute(k, v);
       });
       (children || []).forEach((c) => { if (c !== null && c !== undefined) el.appendChild(c); });

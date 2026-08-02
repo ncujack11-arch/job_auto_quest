@@ -67,6 +67,8 @@
     Object.entries(attrs || {}).forEach(([k, v]) => {
       if (k === 'text') el.textContent = v;
       else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+      else if (v === undefined || v === null || v === false) { /* 忽略空/假值属性 */ }
+      else if (v === true && (k === 'disabled' || k === 'readonly')) el.setAttribute(k, '');
       else el.setAttribute(k, v);
     });
     (children || []).forEach((c) => { if (c) el.appendChild(c); });
