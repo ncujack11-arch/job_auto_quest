@@ -78,246 +78,7 @@
     AS.overlay.clearHighlights();
   }
 
-  // ---------- 匹配计划构建 ----------
-  // 返回 { items: [{field, fieldKey, value, label, ctx}], valueQueues, seenFields }
-  // order: { catId: [entryIndex...] } 经历素材选择顺序; refCodes: 内推码库
-  function buildPlan(fields, profile, rule, memories, reuseActive, sections, valueQueues, order, refCodes) {
-    const items = [];
-    const seenFields = new Set();
-    const getValues = (fieldKey) => {
-      const key = fieldKey.replace(/\[\d+\]/g, '');
-      if (!valueQueues.has(key)) {
-        let vals = AS.matcher.resolveValues(profile, fieldKey);
-        const catId = key.split('.')[0];
-        if (order && order[catId] && Array.isArray(order[catId])) {
-          vals = order[catId].map((idx) => vals[idx]).filter((v) => v !== undefined && v !== null && v !== '');
-        }
-        valueQueues.set(key, vals);
-      }
-      return valueQueues.get(key);
-    };
-    const catAllowed = (fieldKey) => {
-      if (!sections || !sections.length) return true;
-      const catId = fieldKey.replace(/\[\d+\]/g, '').split('.')[0];
-      return sections.includes(catId);
-    };
-    const matchRefCode = (list, host) => {
-      const h = String(host || '').toLowerCase();
-      const hit = (list || []).find((r) => r && r.host && h === r.host.toLowerCase());
-      return hit ? hit.code : '';
-    };
-    const unmatchedFields = [];
-
-    for (const field of fields) {
-      if (seenFields.has(field.el)) continue;
-      seenFields.add(field.el);
-      const ctx = AS.matcher.buildContext(field.el);
-      if (!ctx.visible) continue;
-      // 国际区号/前缀框(如 +86): 无 placeholder 且前文本是纯数字区号 → 跳过
-      if (!ctx.placeholder && /^\+?\d{1,4}$/.test((ctx.prevText || '').trim())) continue;
-
-      let fieldKey = null;
-      let value = null;
-
-      // 0) 内推码: 识别"内推码/推荐码"字段
-      if (!fieldKey && /(内推码|内推|推荐码|推荐人|referral|邀请码)/i.test(ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name)) {
-        const code = matchRefCode(refCodes, location.hostname);
-        if (code) { fieldKey = 'refCode'; value = code; }
-      }
-      // 1) 选择器记忆: 同一域名二次填充优先精准选择器
-      if (!fieldKey) {
-        const sel = AS.matcher.genSelector(field.el);
-        if (memories && sel && memories[sel]) {
-          const memKey = memories[sel];
-          const vals = getValues(memKey);
-          if (vals.length) { fieldKey = memKey; value = vals.shift(); }
-        }
-      }
-      // 2) 复用投递
-      if (!fieldKey && reuseActive) {
-        if (AS.fuzzy.containsAny(ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id, ['公司名称', '公司', '单位名称', 'employer', 'company', 'organization'])) {
-          fieldKey = 'reuse.company';
-          value = reuseActive.company;
-        } else if (AS.fuzzy.containsAny(ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id, ['岗位', '职位', '应聘', 'position', 'job title', 'post'])) {
-          fieldKey = 'reuse.position';
-          value = reuseActive.position;
-        }
-      }
-      // 3) 开放性问题
-      if (!fieldKey && AS.matcher.isOpenQuestionField(ctx)) {
-        const answer = AS.matcher.resolveOpenQuestion(profile, ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name);
-        if (answer !== null) { fieldKey = 'openQuestions'; value = answer; }
-      }
-      // 4) 站点映射 / 关键词匹配
-      if (!fieldKey) {
-        const m = AS.matcher.matchField(ctx, rule);
-        if (m) {
-          fieldKey = m.fieldKey;
-          const vals = getValues(m.fieldKey);
-          if (!vals.length && AS.matcher.isOpenQuestionField(ctx)) {
-            const answer = AS.matcher.resolveOpenQuestion(profile, ctx.labelText + ' ' + ctx.placeholder);
-            if (answer !== null) { fieldKey = 'openQuestions'; value = answer; }
-          } else if (vals.length) {
-            value = vals.shift();
-          } else {
-            fieldKey = null;
-          }
-        }
-      }
-      // 5) 自定义字段匹配(学习模式自动收录的字段, 越用越全)
-      if (!fieldKey) {
-        const cm = AS.matcher.matchCustomField(ctx, profile);
-        if (cm) {
-          const vals = getValues(cm.fieldKey);
-          if (vals.length) { fieldKey = cm.fieldKey; value = vals.shift(); }
-        }
-      }
-
-      if (!fieldKey || value === null || value === undefined) {
-        // 未匹配字段记录(供结果面板展示与定位)
-        unmatchedFields.push({
-          signature: ctx.name || ctx.id || ctx.labelText || ctx.placeholder || '未知字段',
-          label: ctx.labelText || ctx.placeholder || ctx.name || '未知字段',
-          reason: !fieldKey ? '未匹配到信息库字段' : '信息库无对应值',
-          el: field.el,
-        });
-        continue;
-      }
-      if (!catAllowed(fieldKey)) continue;
-      const label = ctx.labelText || ctx.placeholder || ctx.name || ctx.id || '未知字段';
-      items.push({ field, fieldKey, value, label, ctx, sel: AS.matcher.genSelector(field.el) });
-    }
-    return { items, valueQueues, seenFields, unmatchedFields };
-  }
-
-  // ---------- 执行填充计划 ----------
-  // 返回 { snapshots, unmatchedEls } — unmatchedEls 供结果面板点击定位页面字段
-  async function executePlan(plan, selectedSet, opts, settings, report) {
-    const snapshots = [];
-    const items = selectedSet ? plan.items.filter((_, i) => selectedSet.has(i)) : plan.items;
-    const memoriesQueue = [];
-    const unmatchedEls = [];
-    let done = 0;
-    const total = items.length;
-    if (total > 3) AS.overlay.showProgress(0, total, '正在填充');
-    // 级联选择器状态: 相同字段的连续下拉(如 籍贯: 省→市→县)依次用值的分段
-    let cascadeState = null;
-
-    for (const item of items) {
-      report.total++;
-      done++;
-      const { field, fieldKey, value: origValue, label, ctx, sel } = item;
-      let value = origValue;
-      // 级联续段: 上一字段是相同 key 的下拉且有多段剩余 → 用下一段
-      if (field.type === 'select' && cascadeState && cascadeState.key === fieldKey) {
-        const seg = cascadeState.parts.shift();
-        if (!cascadeState.parts.length) cascadeState = null;
-        value = seg;
-      } else if (field.type !== 'select') {
-        cascadeState = null;
-      }
-      if (total > 3 && done % 2 === 0) AS.overlay.showProgress(done, total, '正在填充');
-      setFillState('filling', `正在填充 ${done}/${total}: ${label || fieldKey || '字段'}`);
-      if (!ctx.visible) continue;
-      const snap = snapshotField(field);
-      if (snap) snapshots.push(snap);
-
-      // 文件框: 区分 简历文件 / 证件照
-      if (field.type === 'file') {
-        const ctxText = ctx.labelText + ' ' + ctx.placeholder + ' ' + (field.el.accept || '');
-        if (/(简历|resume|cv)/i.test(ctxText) && /(pdf|doc)/i.test((field.el.accept || '') + ctxText)) {
-          const ok = await AS.filler.fillResumeFile(field.el);
-          if (ok) { report.filled++; AS.overlay.highlight(field.el, 'af-highlight-ok'); }
-          else { report.infos.push({ label, detail: '未配置简历文件, 请手动上传' }); }
-          continue;
-        }
-        const r = await AS.filler.fillField(field, value, opts);
-        if (r.ok && r.action === 'filled') { report.filled++; }
-        else if (r.action === 'info') { report.infos.push({ label, detail: r.detail }); }
-        continue;
-      }
-
-      const r = await AS.filler.fillField(field, value, opts);
-      if (r.ok && r.action === 'filled') {
-        report.filled++;
-        AS.overlay.highlight(field.el, 'af-highlight-ok');
-        // 记录选择器记忆(成功填充且非临时字段)
-        if (sel && fieldKey && !fieldKey.startsWith('reuse.') && fieldKey !== 'openQuestions') {
-          memoriesQueue.push({ sel, fieldKey });
-        }
-        // 填充后生效校验: 文本类字段声明成功但值未真正写入 → 标记"未生效"
-        if ((field.type === 'text' || field.type === 'textarea') && value && String(field.el.value) !== String(value)) {
-          report.notEffective = (report.notEffective || 0) + 1;
-          report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: '已填充但值未生效(框架限制)' });
-          unmatchedEls.push({ el: field.el, label });
-          AS.overlay.highlight(field.el, 'af-highlight');
-        }
-      } else if (r.ok && r.action === 'skipped') {
-        report.skipped++;
-        AS.overlay.highlight(field.el, 'af-highlight-skip');
-      } else if (r.action === 'info') {
-        report.infos.push({ label, detail: r.detail });
-      } else if (r.action === 'error') {
-        report.errors++;
-        report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: r.detail || '填充失败' });
-        unmatchedEls.push({ el: field.el, label });
-        AS.overlay.highlight(field.el, 'af-highlight');
-      } else {
-        // 未匹配: 多段值(如 "江西 上饶市 余干县" / 日期"2027-07"年/月分列)尝试用第一段填入当前下拉, 剩余段留给下一个同键下拉(级联)
-        if (field.type === 'select' && cascadeState === null) {
-          const parts = AS.dates.splitCascadeValue(origValue);
-          if (parts.length > 1) {
-            const first = parts.shift();
-            let r2 = await AS.filler.fillField(field, first, opts);
-            // 联动加载重试: 下级选项可能未加载完, 等待后重试一次
-            if (!r2.ok && !cascadeState) {
-              await sleep(500);
-              r2 = await AS.filler.fillField(field, first, opts);
-            }
-            if (r2.ok && r2.action === 'filled') {
-              cascadeState = { key: fieldKey, parts };
-              report.filled++;
-              AS.overlay.highlight(field.el, 'af-highlight-ok');
-              if (sel && fieldKey && !fieldKey.startsWith('reuse.') && fieldKey !== 'openQuestions') {
-                memoriesQueue.push({ sel, fieldKey });
-              }
-              continue;
-            }
-          }
-        }
-        // 普通 select 失败: 等待联动选项加载后重试一次(部分系统选项异步渲染)
-        if (field.type === 'select' && cascadeState === null) {
-          await sleep(400);
-          const retry = await AS.filler.fillField(field, value, opts);
-          if (retry.ok && retry.action === 'filled') {
-            report.filled++;
-            AS.overlay.highlight(field.el, 'af-highlight-ok');
-            if (sel && fieldKey && !fieldKey.startsWith('reuse.') && fieldKey !== 'openQuestions') {
-              memoriesQueue.push({ sel, fieldKey });
-            }
-            continue;
-          }
-        }
-        report.unmatched++;
-        report.unmatchedItems.push({ signature: ctx.name || ctx.id || label, label, reason: r.detail || '未匹配' });
-        unmatchedEls.push({ el: field.el, label });
-        AS.overlay.highlight(field.el, 'af-highlight');
-      }
-    }
-
-    // 批量写入选择器记忆(节流: 每轮最多 20 条)
-    try {
-      const host = location.hostname;
-      const slice = memoriesQueue.slice(0, 20);
-      for (const m of slice) {
-        await AS.storage.addMemory(host, m.sel, m.fieldKey);
-      }
-    } catch (e) { LOG().warn('content', 'save memory failed', e); }
-
-    if (total > 3) AS.overlay.closeProgress();
-
-    return { snapshots, unmatchedEls };
-  }
+  // buildPlan/executePlan 已抽离至 modules/fill-engine.js (AS.fillEngine)
 
   // ---------- 动态行表单: 查找"添加经历"按钮 ----------
   function findAddRowButton() {
@@ -401,6 +162,24 @@
     window.__af_fill_lock = CURRENT_VERSION;
     setTimeout(() => { if (window.__af_fill_lock === CURRENT_VERSION) window.__af_fill_lock = ''; }, 60000);
     return true;
+  }
+  // 填充引擎上下文(buildPlan/executePlan 位于 modules/fill-engine.js, 与 E2E 共用)
+  function engineContext(report) {
+    return {
+      report,
+      snapshot: snapshotField,
+      highlight: (el, kind) => AS.overlay.highlight(el, kind),
+      showProgress: (d, t, l) => { if (t > 3) AS.overlay.showProgress(d, t, l); },
+      closeProgress: () => AS.overlay.closeProgress(),
+      setFillState,
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      flushMemories: async (queue) => {
+        try {
+          const host = location.hostname;
+          for (const m of queue) await AS.storage.addMemory(host, m.sel, m.fieldKey);
+        } catch (e) { LOG().warn('content', 'save memory failed', e); }
+      },
+    };
   }
   function withTimeout(promise, ms, label) {
     return Promise.race([
@@ -514,7 +293,7 @@
     if (window.top === window && scannedFields.length > 0) {
       safeToast(`🔍 扫描到 ${scannedFields.length} 个表单字段, 正在匹配...`, 3000);
     }
-    let plan = buildPlan(scannedFields, profile, rule, memories, reuseActive, sections, valueQueues, expOrder || null, settings.refCodes);
+    let plan = AS.fillEngine.buildPlan(scannedFields, profile, rule, memories, reuseActive, sections, valueQueues, expOrder || null, settings.refCodes, location.hostname);
     plan.items.forEach((it) => seenFields.add(it.field.el));
     // 未匹配字段计入报告(供结果面板展示与点击定位)
     plan.unmatchedFields.forEach((u) => {
@@ -576,7 +355,7 @@
       setFillState('waiting-preview', '等待在预览面板点击「确认填充」(如面板不可见将 120 秒后自动继续)');
       // 保存确认回调: popup 可发送 AF_PREVIEW_CONFIRM 直接确认, 无需在页面点击
       window.__af_preview_confirm = (selectedSet) => {
-        executePlan(plan, selectedSet, opts, settings, report)
+        AS.fillEngine.executePlan(plan, selectedSet, opts, engineContext(report))
           .then((r) => finish(r.snapshots, r.unmatchedEls, true))
           .catch((e) => LOG().warn('content', 'preview confirm exec failed', e));
         AS.overlay.ensureFloatBall();
@@ -603,7 +382,7 @@
       return;
     }
 
-    let r = await executePlan(plan, null, opts, settings, report);
+    let r = await AS.fillEngine.executePlan(plan, null, opts, engineContext(report));
     let snapshots = r.snapshots;
     let unmatchedEls = r.unmatchedEls;
 
@@ -623,10 +402,10 @@
       await sleep(700);
       const fresh = AS.scanner.scan().filter((f) => !seenFields.has(f.el));
       if (!fresh.length) break;
-      const extra = buildPlan(fresh, profile, rule, null, reuseActive, sections, valueQueues, null, settings.refCodes);
+      const extra = AS.fillEngine.buildPlan(fresh, profile, rule, null, reuseActive, sections, valueQueues, null, settings.refCodes, location.hostname);
       extra.items.forEach((it) => seenFields.add(it.field.el));
       if (!extra.items.length) break;
-      const er = await executePlan(extra, null, opts, settings, report);
+      const er = await AS.fillEngine.executePlan(extra, null, opts, engineContext(report));
       // 行内漏填重试: 嵌套下拉/日期控件偶发未写入时, 等待联动加载后重试
       for (const it of extra.items) {
         try {
@@ -756,17 +535,10 @@
   }
 
   // ---------- 学习模式: 捕获页面已填内容(深化版) ----------
-  // 三级匹配 + 三态判定(一致/差异/新增) + 上下文采集
+  // 实际匹配逻辑位于 capture.js (AS.capture.collect), 此处仅编排数据获取
   function fieldValue(field) {
     const v = AS.capture.getValue(field);
     return v ? v.value : '';
-  }
-
-  function triStateOf(profile, fieldKey, pageValue) {
-    const vals = AS.matcher.resolveValues(profile, fieldKey);
-    if (!vals.length) return 'new';
-    if (vals.includes(pageValue)) return 'same';
-    return 'diff';
   }
 
   async function collectManualInputs() {
@@ -785,68 +557,7 @@
       AS.storage.getMemoriesForHost(location.hostname),
       AS.storage.getUserAliases(),
     ]);
-    const { captured, errors } = await AS.capture.captureAll();
-    const items = [];
-    const seen = new Set();
-
-    for (const c of captured) {
-      const ctx = AS.matcher.buildContext(c.el);
-
-      // 开放题答案 → 题库
-      if (AS.matcher.isOpenQuestionField(ctx)) {
-        const question = (ctx.labelText || ctx.placeholder || c.name || '开放题').slice(0, 60);
-        const inLibrary = (profile.data.openQuestions || []).some((q) => q.question === question && q.answer === c.value);
-        if (!inLibrary) {
-          items.push({
-            type: 'openQuestions', fieldKey: 'openQuestions', question, answer: c.value, pageValue: c.value,
-            state: triStateOf(profile, 'openQuestions', c.value), label: question, selector: c.selector,
-            module: c.module, rowGroup: c.rowGroup, confidence: 80, frame: c.frame,
-          });
-        }
-        continue;
-      }
-
-      // 三级匹配
-      const m = AS.matcher.matchForCapture(ctx, c.el, { memories, rule, profile, aliases });
-      if (m) {
-        const base = m.fieldKey.replace(/\[\d+\]/g, '');
-        const [catId] = base.split('.');
-        const cat = AS.schema.findCategory(catId);
-        // 经历类: 整行捕获(rowGroup)合并处理, 单字段也收集
-        if (!cat || catId === 'openQuestions') continue;
-        const state = triStateOf(profile, m.fieldKey, c.value);
-        const dupKey = 'f|' + m.fieldKey + '|' + c.rowGroup + '|' + c.value;
-        if (seen.has(dupKey)) continue;
-        seen.add(dupKey);
-        items.push({
-          type: cat.repeatable ? 'entry' : 'field',
-          fieldKey: m.fieldKey, catId, key: base.split('.')[1],
-          pageValue: c.value, state, confidence: m.confidence, level: m.level,
-          label: ctx.labelText || c.placeholder || c.name || c.label || '未知字段',
-          selector: c.selector, module: c.module, rowGroup: c.rowGroup,
-          frame: c.frame, display: c.display,
-        });
-        continue;
-      }
-
-      // 未匹配 → 智能收录为自定义字段
-      const labelText = ctx.labelText || c.placeholder || c.name || '';
-      const key = labelText ? AS.fuzzy.normalize(labelText).slice(0, 20) : '';
-      if (key && key.length >= 2) {
-        const existing = (profile.data.custom || []).find((x) => x.key === key);
-        const state = existing ? (String(existing.value) === c.value ? 'same' : 'diff') : 'new';
-        const dupKey = 'c|' + key + '|' + c.value;
-        if (!seen.has(dupKey)) {
-          seen.add(dupKey);
-          items.push({
-            type: 'custom', fieldKey: 'custom.' + key, key,
-            pageValue: c.value, state, confidence: 45, level: 'fallback',
-            label: labelText.slice(0, 20), selector: c.selector,
-            module: c.module, rowGroup: c.rowGroup, frame: c.frame, display: c.display,
-          });
-        }
-      }
-    }
+    const items = await AS.capture.collect(profile, { rule, memories, aliases });
     LOG().info('content', 'learn collected', items.length, 'items in', frameLabel());
     return items;
   }

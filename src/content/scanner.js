@@ -121,8 +121,8 @@
       if (!inFormLikeContext(el)) return;
       const role = el.getAttribute && el.getAttribute('role');
       const tag = el.tagName.toLowerCase();
-      if (role === 'combobox' || (tag === 'div' && el.querySelector && el.querySelector('input,textarea'))) {
-        const inner = el.querySelector('input:not([type="hidden"]),textarea');
+      if (role === 'combobox' || (tag === 'div' && el.querySelector && el.querySelector('input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]),textarea'))) {
+        const inner = el.querySelector('input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]),textarea');
         if (inner) { handle(inner, 'text', { custom: el, customRole: 'combobox' }); return; }
         handle(el, 'custom', { customRole: 'combobox' });
       } else if (role === 'textbox' || el.isContentEditable) {

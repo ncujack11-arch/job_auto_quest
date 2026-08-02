@@ -160,6 +160,96 @@
   }
   let ignoreCache = null;
 
+  // ---------- 捕获 → 结构化 items(含三级匹配与三态判定) ----------
+  // profile: 当前方案; opts: { rule, memories, aliases }
+  // 返回 items: [{type: field|entry|custom|openQuestions, fieldKey, pageValue, state, confidence, label, selector, module, rowGroup, frame, display, question?}]
+  async function collect(profile, opts) {
+    const o = opts || {};
+    const { captured } = await captureAll();
+    const items = [];
+    const seen = new Set();
+    const FZ = AS.fuzzy;
+
+    for (const c of captured) {
+      const ctx = AS.matcher.buildContext(c.el);
+      // radio/checkbox: labelText 为选项文本(如 "男"/"是"), 需用行首标签(如 "性别"/"是否服从分配")匹配
+      if (c.type === 'radio' || c.type === 'checkbox') {
+        try {
+          const row = c.el.closest('.row, .form-item, li, tr');
+          if (row) {
+            const firstLbl = row.querySelector(':scope > label, :scope > span > label, :scope > div > label, :scope > label:first-child');
+            const t = firstLbl ? (firstLbl.textContent || '').trim() : '';
+            if (t && t.length >= 2 && t.length <= 16 && !/(男|女|是|否|同意|愿意)$/.test(t)) {
+              ctx.labelText = t;
+            }
+          }
+        } catch (e) { /* ignore */ }
+      }
+
+      // 开放题答案 → 题库
+      if (AS.matcher.isOpenQuestionField(ctx)) {
+        const question = (ctx.labelText || ctx.placeholder || c.name || '开放题').slice(0, 60);
+        const inLibrary = (profile.data.openQuestions || []).some((q) => q.question === question && q.answer === c.value);
+        if (!inLibrary) {
+          items.push({
+            type: 'openQuestions', fieldKey: 'openQuestions', question, answer: c.value, pageValue: c.value,
+            state: triState(profile, 'openQuestions', c.value), label: question, selector: c.selector,
+            module: c.module, rowGroup: c.rowGroup, confidence: 80, frame: c.frame,
+          });
+        }
+        continue;
+      }
+
+      const m = AS.matcher.matchForCapture(ctx, c.el, { memories: o.memories, rule: o.rule, profile, aliases: o.aliases });
+      if (m) {
+        const base = m.fieldKey.replace(/\[\d+\]/g, '');
+        const [catId] = base.split('.');
+        const cat = AS.schema.findCategory(catId);
+        if (!cat || catId === 'openQuestions') continue;
+        const state = triState(profile, m.fieldKey, c.value);
+        const dupKey = 'f|' + m.fieldKey + '|' + c.rowGroup + '|' + c.value;
+        if (seen.has(dupKey)) continue;
+        seen.add(dupKey);
+        items.push({
+          type: cat.repeatable ? 'entry' : 'field',
+          fieldKey: m.fieldKey, catId, key: base.split('.')[1],
+          pageValue: c.value, state, confidence: m.confidence, level: m.level,
+          label: ctx.labelText || c.placeholder || c.name || c.label || '未知字段',
+          selector: c.selector, module: c.module, rowGroup: c.rowGroup,
+          frame: c.frame, display: c.display,
+        });
+        continue;
+      }
+
+      // 未匹配 → 智能收录为自定义字段
+      const labelText = ctx.labelText || c.placeholder || c.name || '';
+      const key = labelText ? FZ.normalize(labelText).slice(0, 20) : '';
+      if (key && key.length >= 2) {
+        const existing = (profile.data.custom || []).find((x) => x.key === key);
+        const state = existing ? (String(existing.value) === c.value ? 'same' : 'diff') : 'new';
+        const dupKey = 'c|' + key + '|' + c.value;
+        if (!seen.has(dupKey)) {
+          seen.add(dupKey);
+          items.push({
+            type: 'custom', fieldKey: 'custom.' + key, key,
+            pageValue: c.value, state, confidence: 45, level: 'fallback',
+            label: labelText.slice(0, 20), selector: c.selector,
+            module: c.module, rowGroup: c.rowGroup, frame: c.frame, display: c.display,
+          });
+        }
+      }
+    }
+    return items;
+  }
+
+  // 三态判定: 一致 / 差异 / 新增
+  function triState(profile, fieldKey, pageValue) {
+    const vals = AS.matcher.resolveValues(profile, fieldKey);
+    if (!vals.length) return 'new';
+    if (vals.includes(pageValue)) return 'same';
+    return 'diff';
+  }
+
   AS.capture = {
     captureAll: async () => {
       try { ignoreCache = await AS.storage.getCaptureIgnore(); } catch (e) { ignoreCache = { keywords: [], exact: [] }; }
@@ -170,6 +260,7 @@
       ignoreCache = null;
       return r;
     },
+    collect, triState,
     getValue, genSelectorWithPath, detectModule, rowGroupOf,
   };
 })();

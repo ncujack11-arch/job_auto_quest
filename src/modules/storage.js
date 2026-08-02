@@ -52,6 +52,7 @@
     'src/utils/fuzzy.js',
     'src/utils/dates.js',
     'src/utils/matcher.js',
+    'src/modules/fill-engine.js',
     'src/content/scanner.js',
     'src/content/capture.js',
     'src/content/filler.js',
@@ -60,7 +61,6 @@
     'src/content/quiz.js',
     'src/content/content.js',
   ];
-
   // 内置站点规则: 主流网申系统
   const BUILTIN_RULES = [
     {

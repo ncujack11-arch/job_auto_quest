@@ -56,7 +56,7 @@
     // 技能证书
     englishLevel: ['英语等级', '英语水平', '英语', 'cet', '英语六级', '英语四级', 'english'],
     computerLevel: ['计算机等级', '计算机水平', '计算机', '二级', '三级', 'computer'],
-    certificates: ['证书', '专业证书', '资格证书', '资质证书', '证书名称', 'certificate', 'license', 'qualification'],
+    certificates: ['专业技能证书', '技能证书', '职业资格证书', '专业证书', '资格证书', '资质证书', '证书名称', 'certificate', 'license', 'qualification'],
     awards: ['获奖经历', '所获奖励', '获得奖项', '奖励', 'award', 'prize', 'honor'],
     awardDate: ['获得时间', '获奖时间', '取得时间', '获证时间', 'date'],
     // 求职意向
