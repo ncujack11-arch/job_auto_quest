@@ -355,7 +355,7 @@
     ]);
   }
   async function doFill(msg) {
-    LOG().info('content', 'fill requested in', frameLabel(), frame());
+    LOG().info('content', 'fill requested in', frameLabel());
     if (!acquireFillLock()) {
       LOG().warn('content', 'fill already in progress, skipped');
       return;
