@@ -1,0 +1,18 @@
+# Dependencies (build-time staging only; vendored libs are committed)
+node_modules/
+scripts/vendor-stage/
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Build output
+dist/
+*.zip
+
+# Local logs
+*.log

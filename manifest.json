@@ -1,0 +1,80 @@
+{
+  "manifest_version": 3,
+  "name": "秋招网申自动填充助手",
+  "short_name": "网申自动填充",
+  "version": "1.2.0",
+  "description": "纯本地秋招网申自动填充、简历解析入库与投递台账管理工具。所有数据仅保存在本机浏览器，全程无任何对外网络请求。",
+  "minimum_chrome_version": "102",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "contextMenus",
+    "notifications",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "classic"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": [
+        "src/utils/logger.js",
+        "src/modules/schema.js",
+        "src/modules/storage.js",
+        "src/utils/fuzzy.js",
+        "src/utils/dates.js",
+        "src/utils/matcher.js",
+        "src/content/scanner.js",
+        "src/content/filler.js",
+        "src/content/overlay.js",
+        "src/content/detect.js",
+        "src/content/content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "秋招网申自动填充",
+    "default_icon": {
+      "16": "src/assets/icons/icon16.png",
+      "32": "src/assets/icons/icon32.png",
+      "48": "src/assets/icons/icon48.png",
+      "128": "src/assets/icons/icon128.png"
+    }
+  },
+  "options_page": "src/options/options.html",
+  "icons": {
+    "16": "src/assets/icons/icon16.png",
+    "32": "src/assets/icons/icon32.png",
+    "48": "src/assets/icons/icon48.png",
+    "128": "src/assets/icons/icon128.png"
+  },
+  "commands": {
+    "fill-form": {
+      "suggested_key": {
+        "default": "Alt+Shift+F",
+        "mac": "Alt+Shift+F"
+      },
+      "description": "一键填充当前网申表单"
+    },
+    "open-options": {
+      "suggested_key": {
+        "default": "Alt+Shift+O",
+        "mac": "Alt+Shift+O"
+      },
+      "description": "打开插件配置页"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["src/assets/vendor/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
