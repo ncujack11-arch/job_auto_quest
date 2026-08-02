@@ -182,6 +182,22 @@
       if (!ctx.visible) continue;
       const snap = snapshotField(field);
       if (snap) snapshots.push(snap);
+
+      // 文件框: 区分 简历文件 / 证件照
+      if (field.type === 'file') {
+        const ctxText = ctx.labelText + ' ' + ctx.placeholder + ' ' + (field.el.accept || '');
+        if (/(简历|resume|cv)/i.test(ctxText) && /(pdf|doc)/i.test((field.el.accept || '') + ctxText)) {
+          const ok = await AS.filler.fillResumeFile(field.el);
+          if (ok) { report.filled++; AS.overlay.highlight(field.el, 'af-highlight-ok'); }
+          else { report.infos.push({ label, detail: '未配置简历文件, 请手动上传' }); }
+          continue;
+        }
+        const r = await AS.filler.fillField(field, value, opts);
+        if (r.ok && r.action === 'filled') { report.filled++; }
+        else if (r.action === 'info') { report.infos.push({ label, detail: r.detail }); }
+        continue;
+      }
+
       const r = await AS.filler.fillField(field, value, opts);
       if (r.ok && r.action === 'filled') {
         report.filled++;
@@ -355,6 +371,10 @@
       try { await chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }); } catch (e) { /* noop */ }
       if (report.filled > 0 || report.skipped > 0) {
         setTimeout(() => AS.detect.arm(), 800);
+      }
+      // 滑块/验证码提示
+      if (report.filled > 0 && detectSliderCaptcha()) {
+        setTimeout(() => AS.overlay.toast('⚠ 检测到滑块/验证码组件, 请手动完成验证'), 1200);
       }
       if (reuseActive) AS.storage.clearReusePayload();
       if (!withPanel) return;
@@ -628,6 +648,58 @@
     }
   }
 
+  // ---------- 标记模式: 点击输入框 → 选择对应字段 → 记忆选择器 ----------
+  let markModeActive = false;
+  function enableMarkMode() {
+    if (markModeActive) return;
+    markModeActive = true;
+    AS.overlay.toast('🖱 标记模式已开启: 点击页面任意输入框, 选择它对应的信息库字段 (60 秒后自动关闭)');
+    document.addEventListener('click', onMarkClick, true);
+    setTimeout(() => {
+      if (markModeActive) {
+        markModeActive = false;
+        document.removeEventListener('click', onMarkClick, true);
+        AS.overlay.toast('标记模式已关闭');
+      }
+    }, 60000);
+  }
+
+  async function onMarkClick(e) {
+    const el = e.target;
+    if (!el || !el.tagName || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const sel = AS.matcher.genSelector(el);
+    if (!sel) {
+      AS.overlay.toast('该元素没有 id/name, 无法记忆(可先在信息库用学习模式导入)');
+      markModeActive = false;
+      document.removeEventListener('click', onMarkClick, true);
+      return;
+    }
+    AS.overlay.showFieldPicker((fieldKey) => {
+      markModeActive = false;
+      document.removeEventListener('click', onMarkClick, true);
+      if (fieldKey) {
+        AS.storage.addMemory(location.hostname, sel, fieldKey)
+          .then(() => AS.overlay.toast(`已记忆: ${sel} → ${fieldKey} ✔ 下次自动填充`))
+          .catch(() => AS.overlay.toast('记忆保存失败'));
+      }
+    }, el);
+  }
+
+  // ---------- 滑块/验证码检测 ----------
+  function detectSliderCaptcha() {
+    try {
+      const els = document.querySelectorAll('[class*="captcha"],[class*="slider"],[class*="verify"],[class*="geetest"],[class*="nc_wrapper"],[id*="captcha"],[role="slider"]');
+      for (const el of els) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 40 && rect.height > 10) return true;
+      }
+      const body = (document.body && document.body.innerText) || '';
+      return /(拖动滑块|滑动验证|拖动.*到.*验证|完成.*安全验证|请完成验证|验证通过后|拖动到最右边)/.test(body.slice(0, 3000));
+    } catch (e) { return false; }
+  }
+
   // ---------- 消息路由 ----------
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || typeof msg !== 'object') return;
@@ -649,6 +721,9 @@
           AS.overlay.ensureFloatBall();
           AS.overlay.toast('悬浮操作面板已显示 (可拖拽)');
         }
+        break;
+      case 'AF_ENABLE_MARK_MODE':
+        if (window.top === window) enableMarkMode();
         break;
       case 'AF_SAVE_SELECTION':
         if (window.top === window && msg.text && msg.text.trim()) {

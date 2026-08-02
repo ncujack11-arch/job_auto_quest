@@ -451,6 +451,7 @@
         addRow(icon, name, () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_FILL_SECTIONS', sections: [key] }); });
       });
       body.appendChild(h('div', { class: 'af-fp-divider' }));
+      addRow('🖱', '标记字段模式(点击输入框选择对应字段)', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_ENABLE_MARK_MODE' }); });
       addRow('📋', '记录本次投递', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_RECORD_NOW' }); });
       addRow('📥', '捕获页面已填内容', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT' }); });
       panel.appendChild(head);
@@ -556,9 +557,51 @@
     return panel;
   }
 
+  // ---------- 标记模式: 字段选择器 ----------
+  function showFieldPicker(onDone, anchorEl) {
+    const cats = AS.schema.CATEGORIES.filter((c) => c.id !== 'openQuestions');
+    const sel = h('select', { id: 'af-pick-field', style: 'width:100%' });
+    cats.forEach((cat) => {
+      const group = document.createElement('optgroup');
+      group.label = cat.name;
+      cat.fields.forEach((f) => {
+        const opt = document.createElement('option');
+        opt.value = cat.id + '.' + f.key;
+        opt.textContent = f.label + ' (' + f.key + ')';
+        group.appendChild(opt);
+      });
+      sel.appendChild(group);
+    });
+    // 当前元素已匹配到的字段优先选中
+    if (anchorEl && anchorEl.name) {
+      const m = AS.matcher.matchField(AS.matcher.buildContext(anchorEl), null);
+      if (m) {
+        const base = m.fieldKey.replace(/\[\d+\]/g, '');
+        const found = Array.from(sel.options).find((o) => o.value === base);
+        if (found) sel.value = found.value;
+      }
+    }
+    const panel = showPanel(h('div', {}, [
+      head('标记此字段', h('button', { class: 'af-close', text: '×', onclick: () => { closePanel(); onDone && onDone(null); } })),
+      h('div', { class: 'af-body' }, [
+        h('p', { style: 'font-size:12px;color:#6b7280;margin-bottom:8px', text: '选择该输入框对应的信息库字段, 插件将记住此网站的这个位置, 下次自动填充。' }),
+        sel,
+        h('div', { class: 'af-actions' }, [
+          h('button', { class: 'af-btn ghost', text: '取消', onclick: () => { closePanel(); onDone && onDone(null); } }),
+          h('button', { class: 'af-btn primary', text: '确定并记住', onclick: () => {
+            const v = shadow.querySelector('#af-pick-field').value;
+            closePanel();
+            onDone && onDone(v || null);
+          } }),
+        ]),
+      ]),
+    ]));
+    return panel;
+  }
+
   AS.overlay = {
     showSummary, showRecordPanel, showUnlockPrompt, showLearnPanel, showPreview,
-    showExperiencePicker,
+    showExperiencePicker, showFieldPicker,
     highlight, clearHighlights, toast, closePanel, ensureFloatBall,
   };
 })();

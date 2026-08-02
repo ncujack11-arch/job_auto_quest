@@ -6,6 +6,7 @@
 
 importScripts(
   '../utils/logger.js',
+  '../utils/idb.js',
   '../modules/schema.js',
   '../modules/storage.js',
   '../utils/fuzzy.js',
@@ -21,8 +22,15 @@ const LOG = AS.logger;
 // ---------- 初始化 ----------
 async function init() {
   try {
-    await AS.storage.getSiteRules();   // 播种内置站点规则
-    await AS.storage.getStatusFlow();  // 播种默认状态流
+    // 合并新增的内置站点规则(只补缺失 id, 不覆盖用户自定义)
+    const rules = await AS.storage.getSiteRules();
+    const have = new Set(rules.map((r) => r.id));
+    const missing = AS.storage.BUILTIN_RULES.filter((r) => !have.has(r.id));
+    if (missing.length) {
+      await AS.storage.saveSiteRules(rules.concat(missing));
+      LOG.info('bg', 'merged new builtin rules', missing.length);
+    }
+    await AS.storage.getStatusFlow();   // 播种默认状态流
     await AS.reminders.syncAlarms();
   } catch (e) {
     LOG.error('bg', 'init failed', e);
@@ -299,6 +307,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
       break;
     }
+
+    case 'AF_GET_RESUME_FILE':
+      // 读取本地存储的简历文件(IndexedDB), 供页面 file 控件自动上传
+      AS.idb.get('resumeFile').then((file) => {
+        if (!file) return sendResponse({ found: false });
+        file.arrayBuffer().then((buf) => {
+          sendResponse({ found: true, name: file.name, type: file.type || 'application/pdf', size: file.size, data: buf });
+        }).catch((e) => sendResponse({ found: false, error: e.message || String(e) }));
+      }).catch((e) => sendResponse({ found: false, error: e.message || String(e) }));
+      return true;
+
+    case 'AF_ENABLE_MARK_MODE':
+      getActiveTab().then((tab) => {
+        if (!tab) return;
+        ensureInjected(tab.id).then((ok) => {
+          if (ok) chrome.tabs.sendMessage(tab.id, { type: 'AF_ENABLE_MARK_MODE' }).catch(() => {});
+        });
+      });
+      break;
 
     case 'AF_LEARN_SAVE':
       AS.storage.getActiveProfile().then(async (profile) => {

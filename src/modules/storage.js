@@ -22,7 +22,7 @@
   };
 
   const DEFAULT_SETTINGS = {
-    version: '1.7.0',
+    version: '1.8.0',
     activeProfileId: null,
     conflictMode: 'skip',        // 'skip' | 'overwrite'
     typingMode: false,           // 逐字模拟输入
@@ -112,6 +112,90 @@
         'gender': 'basic.gender', 'birthday': 'basic.birthday', 'school': 'education[0].school',
         'degree': 'education[0].degree', 'major': 'education[0].major', 'graduate_time': 'education[0].eduEnd',
         'position': 'intent.targetPosition', 'expect_city': 'intent.targetCity',
+      },
+    },
+    // ---------- 大厂招聘官网预设规则 ----------
+    {
+      id: 'rule_huawei', siteName: '华为招聘', host: 'career.huawei.com', builtin: true, enabled: true,
+      mapping: {
+        'name': 'basic.name', 'realName': 'basic.name', 'mobile': 'basic.phone', 'phone': 'basic.phone',
+        'email': 'basic.email', 'gender': 'basic.gender', 'idCard': 'basic.idCard',
+        'school': 'education[0].school', 'degree': 'education[0].degree', 'major': 'education[0].major',
+        'graduateTime': 'education[0].eduEnd', 'graduationTime': 'education[0].eduEnd',
+        'expectedPosition': 'intent.targetPosition', 'expectedCity': 'intent.targetCity',
+      },
+    },
+    {
+      id: 'rule_bytedance', siteName: '字节跳动招聘', host: 'jobs.bytedance.com', builtin: true, enabled: true,
+      mapping: {
+        'name': 'basic.name', 'real_name': 'basic.name', 'mobile': 'basic.phone', 'phone': 'basic.phone',
+        'email': 'basic.email', 'gender': 'basic.gender',
+        'school': 'education[0].school', 'school_name': 'education[0].school', 'degree': 'education[0].degree',
+        'major': 'education[0].major', 'graduate_time': 'education[0].eduEnd', 'graduation_time': 'education[0].eduEnd',
+        'job': 'intent.targetPosition', 'job_name': 'intent.targetPosition', 'city': 'intent.targetCity',
+      },
+    },
+    {
+      id: 'rule_alibaba', siteName: '阿里巴巴招聘', host: 'talent.alibaba.com', builtin: true, enabled: true,
+      mapping: {
+        'name': 'basic.name', 'mobile': 'basic.phone', 'phone': 'basic.phone', 'email': 'basic.email',
+        'gender': 'basic.gender', 'school': 'education[0].school', 'degree': 'education[0].degree',
+        'major': 'education[0].major', 'graduateTime': 'education[0].eduEnd',
+        'positionName': 'intent.targetPosition', 'expectCity': 'intent.targetCity',
+      },
+    },
+    {
+      id: 'rule_tencent', siteName: '腾讯招聘', host: 'join.qq.com', builtin: true, enabled: true,
+      mapping: {
+        'name': 'basic.name', 'mobile': 'basic.phone', 'phone': 'basic.phone', 'email': 'basic.email',
+        'gender': 'basic.gender', 'birthday': 'basic.birthday', 'school': 'education[0].school',
+        'degree': 'education[0].degree', 'major': 'education[0].major', 'graduateTime': 'education[0].eduEnd',
+        'postName': 'intent.targetPosition', 'expectCity': 'intent.targetCity',
+      },
+    },
+    {
+      id: 'rule_meituan', siteName: '美团招聘', host: 'campus.meituan.com', builtin: true, enabled: true,
+      mapping: {
+        'name': 'basic.name', 'mobile': 'basic.phone', 'phone': 'basic.phone', 'email': 'basic.email',
+        'gender': 'basic.gender', 'school': 'education[0].school', 'degree': 'education[0].degree',
+        'major': 'education[0].major', 'graduateTime': 'education[0].eduEnd',
+        'position': 'intent.targetPosition', 'expectCity': 'intent.targetCity',
+      },
+    },
+    {
+      id: 'rule_jd', siteName: '京东招聘', host: 'campus.jd.com', builtin: true, enabled: true,
+      mapping: {
+        'name': 'basic.name', 'realName': 'basic.name', 'mobile': 'basic.phone', 'phone': 'basic.phone',
+        'email': 'basic.email', 'gender': 'basic.gender', 'school': 'education[0].school',
+        'degree': 'education[0].degree', 'major': 'education[0].major', 'graduateTime': 'education[0].eduEnd',
+        'jobName': 'intent.targetPosition', 'expectWorkCity': 'intent.targetCity',
+      },
+    },
+    {
+      id: 'rule_netease', siteName: '网易招聘', host: 'campus.163.com', builtin: true, enabled: true,
+      mapping: {
+        'name': 'basic.name', 'mobile': 'basic.phone', 'phone': 'basic.phone', 'email': 'basic.email',
+        'gender': 'basic.gender', 'school': 'education[0].school', 'degree': 'education[0].degree',
+        'major': 'education[0].major', 'graduate_time': 'education[0].eduEnd',
+        'position': 'intent.targetPosition', 'expectCity': 'intent.targetCity',
+      },
+    },
+    {
+      id: 'rule_xiaomi', siteName: '小米招聘', host: 'campus.xiaomi.com', builtin: true, enabled: true,
+      mapping: {
+        'name': 'basic.name', 'mobile': 'basic.phone', 'phone': 'basic.phone', 'email': 'basic.email',
+        'gender': 'basic.gender', 'school': 'education[0].school', 'degree': 'education[0].degree',
+        'major': 'education[0].major', 'graduateTime': 'education[0].eduEnd',
+        'position': 'intent.targetPosition', 'city': 'intent.targetCity',
+      },
+    },
+    {
+      id: 'rule_baidu', siteName: '百度招聘', host: 'talent.baidu.com', builtin: true, enabled: true,
+      mapping: {
+        'name': 'basic.name', 'mobile': 'basic.phone', 'phone': 'basic.phone', 'email': 'basic.email',
+        'gender': 'basic.gender', 'school': 'education[0].school', 'degree': 'education[0].degree',
+        'major': 'education[0].major', 'graduateTime': 'education[0].eduEnd',
+        'post': 'intent.targetPosition', 'expectCity': 'intent.targetCity',
       },
     },
   ];

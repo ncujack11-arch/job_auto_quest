@@ -119,13 +119,37 @@
   function fillRichText(el, value) {
     if (el.isContentEditable) {
       el.focus();
-      el.textContent = String(value);
+      // 用 innerText 保留换行(UEditor/TinyMCE 等富文本编辑器兼容)
+      el.innerText = String(value);
       el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       el.dispatchEvent(new Event('blur', { bubbles: true }));
       return true;
     }
     return false;
+  }
+
+  // 手机号格式适配: 目标框带分隔占位(如 xxx-xxxx-xxxx)时转 3-4-4
+  function adaptPhoneFormat(el, value) {
+    const v = String(value || '');
+    const digits = v.replace(/\D/g, '');
+    if (!/^1\d{10}$/.test(digits)) return v;
+    const ph = (el && (el.placeholder || '')) || '';
+    const ctx = ((el && (el.className || '')) + ' ' + (el && el.name ? el.name : '') + ' ' + ph).toLowerCase();
+    if (ph.includes('-') || /xxx|___|---/.test(ph) || (ctx.includes('phone') && (ctx.includes('-') || ctx.includes('_')))) {
+      return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+    }
+    if (/86[- ]/.test(ph)) return '+86 ' + digits;
+    return v;
+  }
+
+  // 长度自适应截断
+  function truncateFor(el, value) {
+    const max = el && typeof el.maxLength === 'number' ? el.maxLength : 0;
+    if (max > 0 && String(value).length > max) {
+      return { value: String(value).slice(0, max), truncated: true, max };
+    }
+    return { value, truncated: false };
   }
 
   // 自定义下拉组件(ElementUI / AntD / 原生角色)
@@ -186,6 +210,23 @@
     }
   }
 
+  // 简历文件自动上传(文件存于本地 IndexedDB, 经后台中转)
+  async function fillResumeFile(el) {
+    try {
+      const r = await chrome.runtime.sendMessage({ type: 'AF_GET_RESUME_FILE' });
+      if (!r || !r.found || !r.data) return false;
+      const file = new File([r.data], r.name || 'resume.pdf', { type: r.type || 'application/pdf' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      el.files = dt.files;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   // 主填充函数
   // field: scanner 产出的字段; value: 字符串值; opts: {typing, typingMin, typingMax, conflictMode, photoDataUrl}
   // 返回: {ok: bool, action: 'filled'|'skipped'|'info', detail}
@@ -215,10 +256,19 @@
     try {
       switch (type) {
         case 'text': {
-          const target = String(value || '');
+          // 验证码字段绝不填充
+          if (/(验证码|图形码|校验码|captcha|verify)/i.test(((el.placeholder || '') + ' ' + (el.name || '') + ' ' + (el.className || '')).replace(/(滑块|滑动)/g, ''))) {
+            return { ok: false, action: 'info', detail: '验证码字段, 请手动填写' };
+          }
+          let target = String(value || '');
+          const fmt = adaptPhoneFormat(el, target);
+          const tr = truncateFor(el, fmt);
+          target = tr.value;
           if (o.typing) { await simulateTyping(el, target, o.typingMin || 30, o.typingMax || 120); }
           else { setNativeValue(el, target); }
-          return { ok: true, action: 'filled' };
+          return tr.truncated
+            ? { ok: true, action: 'filled', detail: `已按长度限制截断为 ${tr.max} 字` }
+            : { ok: true, action: 'filled' };
         }
         case 'textarea': {
           setNativeValue(el, String(value || ''));
@@ -278,5 +328,5 @@
     }
   }
 
-  AS.filler = { fillField, setNativeValue, fillSelect, fillFileUpload, VALUE_ALIASES };
+  AS.filler = { fillField, setNativeValue, fillSelect, fillFileUpload, fillResumeFile, VALUE_ALIASES };
 })();

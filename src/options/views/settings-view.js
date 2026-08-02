@@ -418,6 +418,40 @@
     photoItem.appendChild(photoInput);
     card.appendChild(photoItem);
 
+    // 简历文件(存 IndexedDB, 供网申"上传简历"控件自动上传)
+    const resumeItem = UI().el('div', { class: 'form-item', style: 'max-width:520px;margin-top:14px' });
+    resumeItem.appendChild(UI().el('label', { text: '简历文件(PDF, 本地 IndexedDB 存储, 网申上传简历控件自动填充)' }));
+    const rWrap = UI().el('div', { style: 'display:flex;gap:10px;align-items:center' });
+    const rStatus = UI().el('span', { style: 'font-size:12px;color:#6b7280' });
+    const resumeInput = UI().el('input', { type: 'file', accept: '.pdf,.docx', style: 'display:none' });
+    const refreshResume = async () => {
+      const f = await AS.idb.get('resumeFile');
+      rStatus.textContent = f ? `已配置: ${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)` : '未配置';
+    };
+    refreshResume();
+    resumeInput.addEventListener('change', async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      try {
+        await AS.idb.put('resumeFile', f);
+        refreshResume();
+        UI().toast('简历文件已保存(仅存本地)', 'success');
+      } catch (err) {
+        UI().toast('保存失败: ' + err.message, 'error');
+      }
+    });
+    rWrap.appendChild(UI().el('button', { class: 'btn sm', text: '选择简历文件', onclick: () => resumeInput.click() }));
+    rWrap.appendChild(rStatus);
+    rWrap.appendChild(UI().el('button', {
+      class: 'btn sm danger', text: '移除', onclick: async () => {
+        await AS.idb.remove('resumeFile');
+        refreshResume();
+      },
+    }));
+    resumeItem.appendChild(rWrap);
+    resumeItem.appendChild(resumeInput);
+    card.appendChild(resumeItem);
+
     // 内推码库
     const refItem = UI().el('div', { class: 'form-item', style: 'max-width:520px;margin-top:14px' });
     refItem.appendChild(UI().el('label', { text: '内推码库(自动填入"内推码"字段, 按站点域名匹配)' }));
