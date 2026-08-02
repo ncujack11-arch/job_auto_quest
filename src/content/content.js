@@ -893,6 +893,50 @@
 
   AS.contentMain = { doFill, grabPageInfo, collectManualInputs, isJDPageLike, cacheCurrentJD, matchCachedJD, extractJobId };
 
+  // ---------- JD 详情页快捷按钮: 检测到 JD 后右下角显示「保存 JD 快照」----------
+  let jdBtnEl = null;
+  function showJDRecordButton() {
+    try {
+      if (jdBtnEl || !isJDPageLike()) return;
+      if (sessionStorage.getItem('af_jd_btn_closed')) return;
+      const btn = document.createElement('button');
+      btn.textContent = '📄 保存 JD 快照';
+      Object.assign(btn.style, {
+        position: 'fixed', right: '20px', bottom: '150px', zIndex: '2147483646',
+        background: '#2563eb', color: '#fff', border: 'none', borderRadius: '20px',
+        padding: '9px 16px', fontSize: '13px', cursor: 'pointer',
+        boxShadow: '0 4px 14px rgba(37,99,235,.35)', fontFamily: 'inherit',
+      });
+      btn.addEventListener('mouseenter', () => { btn.style.background = '#1d4ed8'; });
+      btn.addEventListener('mouseleave', () => { btn.style.background = '#2563eb'; });
+      btn.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'AF_RECORD_JD' }).catch(() => {});
+        sessionStorage.setItem('af_jd_btn_closed', '1');
+        btn.remove();
+        jdBtnEl = null;
+      });
+      // 关闭小叉
+      const close = document.createElement('span');
+      close.textContent = '×';
+      Object.assign(close.style, {
+        position: 'absolute', top: '-6px', right: '-4px', width: '18px', height: '18px', lineHeight: '16px',
+        textAlign: 'center', background: '#64748b', color: '#fff', borderRadius: '50%', fontSize: '12px', cursor: 'pointer',
+      });
+      close.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sessionStorage.setItem('af_jd_btn_closed', '1');
+        btn.remove();
+        jdBtnEl = null;
+      });
+      btn.appendChild(close);
+      btn.style.position = 'fixed';
+      document.body.appendChild(btn);
+      jdBtnEl = btn;
+      // 6 秒后若未点击自动隐藏(避免打扰)
+      setTimeout(() => { if (jdBtnEl === btn) { btn.remove(); jdBtnEl = null; } }, 20000);
+    } catch (e) { /* ignore */ }
+  }
+
   // ---------- 右键快捷复制: 输入框右键弹「快速复制」菜单, 一键复制常用字段值 ----------
   const COPY_FIELDS = [
     ['姓名', 'basic.name'], ['手机号', 'basic.phone'], ['邮箱', 'basic.email'], ['身份证号', 'basic.idCard'],
@@ -1072,7 +1116,9 @@
     // JD 详情页: 自动缓存 JD(供投递表单页记录时回退, 防串台校验在 matchCachedJD)
     // 页面内容可能异步渲染, 定时重试(1.5s / 4s / 8s)直至抓到
     [1500, 4000, 8000].forEach((ms) => {
-      setTimeout(() => { cacheCurrentJD().catch(() => {}); }, ms);
+      setTimeout(() => {
+        cacheCurrentJD().then((c) => { if (c) showJDRecordButton(); }).catch(() => {});
+      }, ms);
     });
     // 就绪提示(诊断用, 每会话一次): 确认插件已注入且能扫描到字段
     try {
