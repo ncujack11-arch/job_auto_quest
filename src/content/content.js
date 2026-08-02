@@ -710,6 +710,21 @@
     } catch (e) { return false; }
   }
 
+  // ---------- 网申避坑提示(每会话一次) ----------
+  let tipsShown = false;
+  async function showSiteTips() {
+    if (tipsShown) return;
+    tipsShown = true;
+    try {
+      const tips = await AS.storage.getTipsForHost(location.hostname);
+      if (tips && tips.length) {
+        setTimeout(() => {
+          tips.forEach((t, i) => setTimeout(() => AS.overlay.toast('💡 ' + t, 9000), i * 5000));
+        }, 1800);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   // ---------- 消息路由 ----------
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || typeof msg !== 'object') return;
@@ -777,4 +792,9 @@
   });
 
   AS.contentMain = { doFill, grabPageInfo, collectManualInputs };
+
+  // 注入后: 显示站点避坑提示(仅顶层框架)
+  if (window.top === window) {
+    showSiteTips();
+  }
 })();

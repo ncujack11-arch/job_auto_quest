@@ -418,6 +418,22 @@
     photoItem.appendChild(photoInput);
     card.appendChild(photoItem);
 
+    // 自动锁定
+    const lockItem = UI().el('div', { class: 'form-item', style: 'max-width:520px;margin-top:14px' });
+    lockItem.appendChild(UI().el('label', { text: '闲置自动锁定(5 分钟无操作自动清除会话密钥, 保护敏感字段)' }));
+    const lWrap = UI().el('div', { style: 'display:flex;gap:8px;align-items:center' });
+    const lCheck = UI().el('input', {
+      type: 'checkbox', checked: settings.autoLock !== false,
+      onchange: async (e) => {
+        settings.autoLock = e.target.checked;
+        await AS.storage.saveSettings(settings);
+      },
+    });
+    lWrap.appendChild(lCheck);
+    lWrap.appendChild(UI().el('span', { style: 'font-size:12px;color:#6b7280', text: '开启后离开电脑自动锁定, 填充敏感字段前需重新输入口令' }));
+    lockItem.appendChild(lWrap);
+    card.appendChild(lockItem);
+
     // 简历文件(存 IndexedDB, 供网申"上传简历"控件自动上传)
     const resumeItem = UI().el('div', { class: 'form-item', style: 'max-width:520px;margin-top:14px' });
     resumeItem.appendChild(UI().el('label', { text: '简历文件(PDF, 本地 IndexedDB 存储, 网申上传简历控件自动填充)' }));
@@ -513,6 +529,56 @@
       reader.onerror = () => reject(new Error('文件读取失败'));
       reader.readAsDataURL(file);
     });
+  }
+
+  // ---------- 网申避坑提示库 ----------
+  function renderSiteTips(card) {
+    card.appendChild(UI().el('h3', { text: '网申避坑提示', children: [UI().el('span', { class: 'badge', text: '进入对应网站自动提示' })] }));
+    card.appendChild(UI().el('p', { class: 'view-sub', style: 'margin-bottom:12px', text: '如「北森系统切换页面会清空已填内容」「牛客笔试勿切屏」等, 进入网站时悬浮提示一次。' }));
+    const listEl = UI().el('div', { style: 'margin-bottom:8px' });
+    const renderItems = async () => {
+      const map = await AS.storage.getSiteTips();
+      listEl.innerHTML = '';
+      Object.entries(map).forEach(([host, tips]) => {
+        tips.forEach((tip, i) => {
+          const row = UI().el('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:6px;max-width:640px;font-size:12.5px' });
+          row.appendChild(UI().el('span', { style: 'flex:0 0 120px;color:#2563eb', text: host }));
+          row.appendChild(UI().el('span', { style: 'flex:1;color:#374151', text: tip }));
+          row.appendChild(UI().el('button', {
+            class: 'btn sm danger', text: '删', onclick: async () => {
+              const m = await AS.storage.getSiteTips();
+              m[host] = (m[host] || []).filter((x) => x !== tip);
+              if (!m[host].length) delete m[host];
+              await AS.storage.saveSiteTips(m);
+              renderItems();
+            },
+          }));
+          listEl.appendChild(row);
+        });
+      });
+    };
+    renderItems();
+    card.appendChild(listEl);
+    const addRow = UI().el('div', { style: 'display:flex;gap:8px;max-width:640px' });
+    const hostI = UI().el('input', { type: 'text', placeholder: '域名(如 campus.meituan.com)', style: 'flex:1;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px' });
+    const tipI = UI().el('input', { type: 'text', placeholder: '提示内容(进入该网站时显示)', style: 'flex:2;padding:7px 10px;border:1px solid #e2e8f0;border-radius:8px' });
+    const addB = UI().el('button', {
+      class: 'btn sm', text: '添加', onclick: async () => {
+        const h = hostI.value.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+        const t = tipI.value.trim();
+        if (!h || !t) return UI().toast('请填写域名与提示内容', 'error');
+        const m = await AS.storage.getSiteTips();
+        m[h] = m[h] || [];
+        m[h].push(t);
+        await AS.storage.saveSiteTips(m);
+        hostI.value = ''; tipI.value = '';
+        renderItems();
+      },
+    });
+    addRow.appendChild(hostI);
+    addRow.appendChild(tipI);
+    addRow.appendChild(addB);
+    card.appendChild(addRow);
   }
 
   function renderBackup(card) {
@@ -664,6 +730,8 @@
     renderStatusFlow(cFlow);
     const cAdv = UI().el('div', { class: 'card' });
     renderAdvanced(cAdv);
+    const cTips = UI().el('div', { class: 'card' });
+    renderSiteTips(cTips);
     const c2 = UI().el('div', { class: 'card' });
     renderEncryption(c2);
     const c3 = UI().el('div', { class: 'card' });

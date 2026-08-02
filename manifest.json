@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "秋招网申自动填充助手",
   "short_name": "网申自动填充",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "纯本地秋招网申自动填充、简历解析入库与投递台账管理工具。所有数据仅保存在本机浏览器，全程无任何对外网络请求。",
   "minimum_chrome_version": "102",
   "permissions": [
@@ -17,31 +17,6 @@
     "service_worker": "src/background/service-worker.js",
     "type": "classic"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "http://*/*",
-        "https://*/*"
-      ],
-      "js": [
-        "src/utils/logger.js",
-        "src/modules/schema.js",
-        "src/modules/storage.js",
-        "src/utils/fuzzy.js",
-        "src/utils/dates.js",
-        "src/utils/matcher.js",
-        "src/content/scanner.js",
-        "src/content/filler.js",
-        "src/content/overlay.js",
-        "src/content/detect.js",
-        "src/content/quiz.js",
-        "src/content/content.js"
-      ],
-      "run_at": "document_idle",
-      "all_frames": true,
-      "match_about_blank": true
-    }
-  ],
   "action": {
     "default_popup": "src/popup/popup.html",
     "default_title": "秋招网申自动填充",

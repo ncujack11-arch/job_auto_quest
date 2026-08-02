@@ -175,13 +175,27 @@
         item.appendChild(hint);
       } else {
         const input = UI().el('input', {
-          type: 'text', id: `f_${f.key}`, value: encrypted ? '' : value,
+          type: f.sensitive ? 'password' : 'text', id: `f_${f.key}`, value: encrypted ? '' : value,
           placeholder: encrypted ? '🔒 已加密, 解锁后可见' : '',
           disabled: encrypted ? true : undefined,
           oninput: (e) => { data[f.key] = e.target.value; markDirty(); },
         });
         item.appendChild(labelEl);
         item.appendChild(input);
+        // 敏感字段: 默认打码, 可切换显示明文
+        if (f.sensitive && !encrypted) {
+          const toggle = UI().el('button', {
+            class: 'link-btn', style: 'align-self:flex-start', text: '👁 显示', onclick: (ev) => {
+              ev.preventDefault();
+              const inp = document.getElementById(`f_${f.key}`);
+              if (!inp) return;
+              const show = inp.type === 'password';
+              inp.type = show ? 'text' : 'password';
+              ev.target.textContent = show ? '🙈 隐藏' : '👁 显示';
+            },
+          });
+          item.appendChild(toggle);
+        }
         if (encrypted) {
           item.appendChild(UI().el('div', { class: 'locked-hint', style: 'display:flex;justify-content:space-between' }, [
             UI().el('span', { text: '敏感字段已加密存储' }),

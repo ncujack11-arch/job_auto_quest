@@ -379,6 +379,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
       break;
 
+    case 'AF_START_COUNTDOWN': {
+      const end = startCountdown(Math.max(1, parseInt(msg.minutes, 10) || 60));
+      chrome.notifications.create('af_countdown_start', {
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('src/assets/icons/icon128.png'),
+        title: '⏱ 笔试倒计时已启动',
+        message: '结束时间: ' + end + ' · 剩余 15/5 分钟与结束时自动通知',
+        priority: 2,
+      }, () => {});
+      break;
+    }
+
     case 'AF_LEARN_SAVE':
       AS.storage.getActiveProfile().then(async (profile) => {
         if (!profile) return sendResponse({ saved: 0, error: '无信息方案' });

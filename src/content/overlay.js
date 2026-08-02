@@ -453,6 +453,13 @@
       });
       body.appendChild(h('div', { class: 'af-fp-divider' }));
       addRow('🖱', '标记字段模式(点击输入框选择对应字段)', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_ENABLE_MARK_MODE' }); });
+      addRow('⏱', '笔试倒计时(剩余 15/5 分钟通知)', () => {
+        togglePanel(false);
+        const mins = window.prompt('笔试时长(分钟, 如 60 / 90 / 120):', '60');
+        const n = parseInt(mins, 10);
+        if (!n || n <= 0) return;
+        chrome.runtime.sendMessage({ type: 'AF_START_COUNTDOWN', minutes: n });
+      });
       addRow('📋', '记录本次投递', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_RECORD_NOW' }); });
       addRow('📥', '捕获页面已填内容', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT' }); });
       panel.appendChild(head);
