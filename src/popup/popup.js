@@ -212,6 +212,31 @@
     });
   }
 
+  // 实时接收后台广播的填充进度(不依赖页面 overlay)
+  let progressLines = [];
+  let progressDone = false;
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (!msg || msg.type !== 'AF_FILL_PROGRESS') return;
+    if (msg.stage === 'start') {
+      progressLines = ['▶ 填充命令已到达页面'];
+      progressDone = false;
+    } else if (msg.stage === 'scan') {
+      progressLines.push(`🔍 扫描到 ${msg.total} 个表单字段`);
+    } else if (msg.stage === 'match') {
+      progressLines.push(`🎯 匹配到 ${msg.matched} 个字段` + (msg.unmatched ? `, ${msg.unmatched} 个未匹配` : ''));
+    } else if (msg.stage === 'done') {
+      progressDone = true;
+      progressLines.push(`✅ 完成: 成功 ${msg.filled} · 跳过 ${msg.skipped} · 未匹配 ${msg.unmatched}${msg.notEffective ? ` · ⚠未生效 ${msg.notEffective}` : ''}`);
+    } else if (msg.stage === 'error') {
+      progressDone = true;
+      progressLines.push('❌ 异常: ' + (msg.message || '未知错误'));
+    }
+    setStatus(progressDone ? (msg.stage === 'error' ? 'error' : 'ok') : 'ok', progressLines);
+    if (progressDone) {
+      setTimeout(() => { progressLines = []; }, 8000);
+    }
+  });
+
   // 实时接收后台聚合的填充结果
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg && msg.type === 'AF_FILL_SUMMARY' && msg.summary) {

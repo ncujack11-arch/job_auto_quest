@@ -322,6 +322,16 @@
     }
   }
 
+  // 进度上报(经后台广播给 popup, 不依赖页面 overlay, 保证状态可见)
+  function reportProgress(stage, extra) {
+    try {
+      chrome.runtime.sendMessage(Object.assign({ type: 'AF_FILL_PROGRESS', stage }, extra || {})).catch(() => {});
+    } catch (e) { /* ignore */ }
+  }
+  function safeToast(msg, ms) {
+    try { AS.overlay.toast(msg, ms); } catch (e) { /* overlay 不可用时静默 */ }
+  }
+
   // ---------- 核心填充流程 ----------
   // 防重复: 版本自愈后页面可能并存新旧两个 listener, 用锁保证单次执行
   function acquireFillLock() {
@@ -345,11 +355,13 @@
     const t0 = Date.now();
     try {
       if (window.top === window) {
-        try { AS.overlay.toast('▶ 收到填充命令, 开始执行...', 2500); } catch (e) { /* ignore */ }
+        safeToast('▶ 收到填充命令, 开始执行...', 2500);
       }
+      reportProgress('start');
       await withTimeout(doFillInner(msg, t0), 45000, 'fill');
     } catch (e) {
       LOG().error('content', 'doFill failed', e);
+      reportProgress('error', { message: (e && e.message ? e.message.slice(0, 120) : String(e)) });
       try {
         AS.overlay.toast('填充异常: ' + (e && e.message ? e.message.slice(0, 80) : e));
       } catch (e2) { /* ignore */ }
@@ -434,8 +446,9 @@
 
     const scannedFields = AS.scanner.scan();
     report.total = scannedFields.length;
+    reportProgress('scan', { total: scannedFields.length });
     if (window.top === window && scannedFields.length > 0) {
-      AS.overlay.toast(`🔍 扫描到 ${scannedFields.length} 个表单字段, 正在匹配...`, 3000);
+      safeToast(`🔍 扫描到 ${scannedFields.length} 个表单字段, 正在匹配...`, 3000);
     }
     let plan = buildPlan(scannedFields, profile, rule, memories, reuseActive, sections, valueQueues, expOrder || null, settings.refCodes);
     plan.items.forEach((it) => seenFields.add(it.field.el));
@@ -444,22 +457,24 @@
       report.unmatched++;
       report.unmatchedItems.push({ signature: u.signature, label: u.label, reason: u.reason });
     });
+    reportProgress('match', { matched: plan.items.length, unmatched: plan.unmatchedFields.length });
     if (!plan.items.length) {
       // 完全没有可填充字段: 明确反馈, 避免"没反应"
       if (report.unmatched > 0) {
         AS.overlay.showSummary(report, null, plan.unmatchedFields.map((u) => ({ el: u.el, label: u.label })));
       } else {
-        AS.overlay.toast(`未在页面找到可填充的表单字段(扫描 ${scannedFields.length} 个元素)`);
+        safeToast(`未在页面找到可填充的表单字段(扫描 ${scannedFields.length} 个元素)`);
       }
       chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }).catch(() => {});
       return;
     }
     if (window.top === window) {
-      AS.overlay.toast(`🎯 匹配到 ${plan.items.length} 个字段, 开始写入...`, 3000);
+      safeToast(`🎯 匹配到 ${plan.items.length} 个字段, 开始写入...`, 3000);
     }
 
     const finish = async (snapshots, unmatchedEls, withPanel) => {
       LOG().info('content', 'fill done in ' + frameLabel(), { filled: report.filled, unmatched: report.unmatched, took: (Date.now() - t0) + 'ms' });
+      reportProgress('done', { filled: report.filled, skipped: report.skipped, unmatched: report.unmatched, errors: report.errors, notEffective: report.notEffective || 0 });
       try { await chrome.runtime.sendMessage({ type: 'AF_FILL_DONE', payload: report }); } catch (e) { /* noop */ }
       if (report.filled > 0 || report.skipped > 0) {
         setTimeout(() => AS.detect.arm(), 800);

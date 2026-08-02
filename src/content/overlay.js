@@ -399,21 +399,27 @@
   }
 
   function toast(msg, ms) {
-    const t = h('div', { class: 'af-toast', text: msg });
-    shadow.appendChild(t);
-    setTimeout(() => t.remove(), ms || 3000);
+    try {
+      const t = h('div', { class: 'af-toast', text: msg });
+      shadow.appendChild(t);
+      setTimeout(() => t.remove(), ms || 3000);
+    } catch (e) { /* 面板不可用时静默 */ }
   }
 
   // 页面字段高亮(用于失败/成功定位)
   function highlight(el, kind) {
-    if (!el || !el.classList) return;
-    el.classList.remove('af-highlight', 'af-highlight-ok', 'af-highlight-skip');
-    if (kind) el.classList.add(kind);
+    try {
+      if (!el || !el.classList) return;
+      el.classList.remove('af-highlight', 'af-highlight-ok', 'af-highlight-skip');
+      if (kind) el.classList.add(kind);
+    } catch (e) { /* ignore */ }
   }
   function clearHighlights() {
-    document.querySelectorAll('.af-highlight,.af-highlight-ok,.af-highlight-skip').forEach((el) => {
-      el.classList.remove('af-highlight', 'af-highlight-ok', 'af-highlight-skip');
-    });
+    try {
+      document.querySelectorAll('.af-highlight,.af-highlight-ok,.af-highlight-skip').forEach((el) => {
+        el.classList.remove('af-highlight', 'af-highlight-ok', 'af-highlight-skip');
+      });
+    } catch (e) { /* ignore */ }
   }
 
   // ---------- 悬浮操作面板(可拖拽小球) ----------

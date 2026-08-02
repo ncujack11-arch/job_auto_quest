@@ -327,6 +327,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       aggregateFillResults();
       break;
 
+    case 'AF_FILL_PROGRESS':
+      // 转发填充进度给 popup(不依赖页面 overlay 的可见反馈通道)
+      chrome.runtime.sendMessage(msg).catch(() => {});
+      break;
+
     case 'AF_LEARN_COLLECT_RESULT':
       if (sender.tab) {
         learnTabId = sender.tab.id;
