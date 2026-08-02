@@ -323,14 +323,31 @@
   }
 
   // ---------- 核心填充流程 ----------
+  // 防重复: 版本自愈后页面可能并存新旧两个 listener, 用锁保证单次执行
+  function acquireFillLock() {
+    if (window.__af_fill_lock) return false;
+    window.__af_fill_lock = true;
+    setTimeout(() => { window.__af_fill_lock = false; }, 60000);
+    return true;
+  }
+  function withTimeout(promise, ms, label) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('超时: ' + label + ' (' + ms / 1000 + 's)')), ms)),
+    ]);
+  }
   async function doFill(msg) {
     LOG().info('content', 'fill requested in', frameLabel(), frame());
+    if (!acquireFillLock()) {
+      LOG().warn('content', 'fill already in progress, skipped');
+      return;
+    }
     const t0 = Date.now();
     try {
       if (window.top === window) {
-        AS.overlay.toast('▶ 收到填充命令, 开始执行...', 2500);
+        try { AS.overlay.toast('▶ 收到填充命令, 开始执行...', 2500); } catch (e) { /* ignore */ }
       }
-      await doFillInner(msg, t0);
+      await withTimeout(doFillInner(msg, t0), 45000, 'fill');
     } catch (e) {
       LOG().error('content', 'doFill failed', e);
       try {
@@ -852,12 +869,13 @@
   // 旧版本脚本的监听器仍在时, 由版本守卫确保仅当前版本处理消息
   const isCurrent = () => !CURRENT_VERSION || AS.__v === CURRENT_VERSION;
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!msg || typeof msg !== 'object') return;
-    LOG().debug('content', 'msg received', msg.type);
-    switch (msg.type) {
-      case 'AF_FILL':
-        if (isCurrent()) doFill(msg);
-        break;
+    try {
+      if (!msg || typeof msg !== 'object') return;
+      LOG().debug('content', 'msg received', msg.type);
+      switch (msg.type) {
+        case 'AF_FILL':
+          if (isCurrent()) doFill(msg);
+          break;
       case 'AF_GRAB_INFO':
         if (isCurrent()) sendResponse(grabPageInfo());
         break;
@@ -929,6 +947,12 @@
     }
     // 不返回 true: 避免 fire-and-forget 消息长时间占用消息通道
     return false;
+    } catch (e) {
+      // listener 异常捕获: 记录日志并响应(若需要)
+      LOG().warn('content', 'listener error', e);
+      try { sendResponse({ error: (e && e.message) || String(e) }); } catch (e2) { /* ignore */ }
+      return false;
+    }
   });
 
   AS.contentMain = { doFill, grabPageInfo, collectManualInputs };
