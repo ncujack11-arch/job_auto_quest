@@ -359,22 +359,40 @@
     return v === undefined || v === null || v === '' ? [] : [String(v)];
   }
 
-  // 自定义字段匹配: 学习模式自动收录的字段(key/label 作为关键词)参与后续填充
-  function matchCustomField(ctx, profile) {
+  // 自定义字段匹配: 学习模式自动收录的字段(key/label/捕获选择器 参与匹配)
+  // el 传入时优先用捕获时记录的选择器精准定位(同系统复用/页面重渲染均稳定)
+  function matchCustomField(ctx, profile, el) {
     const customs = (profile && profile.data && Array.isArray(profile.data.custom)) ? profile.data.custom : [];
     if (!customs.length) return null;
     const text = (ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name + ' ' + ctx.id).trim();
-    if (!text) return null;
     const fz = FUZZY();
+    let best = null, bestScore = 0;
     for (const c of customs) {
       if (!c || c.value === undefined || c.value === null || String(c.value).trim() === '') continue;
+      // 1) 捕获选择器命中(最高置信, 精准定位)
+      if (el && c._selector) {
+        try {
+          if (el.matches && el.matches(c._selector)) {
+            return { fieldKey: 'custom.' + c.key, score: 95, confidence: 'high', via: 'custom-selector' };
+          }
+        } catch (e) { /* ignore */ }
+      }
       const kw = [c.key, c.label].filter(Boolean);
       if (!kw.length) continue;
-      if (fz.containsAny(text, kw)) {
-        return { fieldKey: 'custom.' + c.key, score: 50, confidence: 'high', via: 'custom' };
+      // 2) 标签匹配: 归一化精确相等 > 包含 > 宽松包含
+      const nt = fz.normalize(text);
+      let sc = 0;
+      for (const k of kw) {
+        const nk = fz.normalize(k);
+        if (!nk) continue;
+        if (nt === nk) sc = Math.max(sc, 80);
+        else if (nt && nt.includes(nk)) sc = Math.max(sc, 60);
+        else if (fz.containsAny(text, [k])) sc = Math.max(sc, 45);
       }
+      if (sc && sc > bestScore) { bestScore = sc; best = c; }
     }
-    return null;
+    if (!best) return null;
+    return { fieldKey: 'custom.' + best.key, score: bestScore, confidence: bestScore >= 70 ? 'high' : 'medium', via: 'custom' };
   }
 
   // 开放题匹配: 在开放题库中找与表单字段语义最接近的问题答案

@@ -111,6 +111,7 @@
           const entry = { key: it.key || 'f' + Date.now().toString(36), label: it.label || '自定义', value: String(it.pageValue).trim(), _sourceDomain: sourceHost, _capturedAt: Date.now(), _confidence: it.confidence };
           if (it.options && it.options.length) entry.options = it.options;
           if (it.ctype) entry.ctype = it.ctype;
+          if (it.selector) entry._selector = it.selector;
           if (it.level === 'format') entry._pending = true;  // 格式捕获: 待填写标记
           d.custom.push(entry);
           added++;

@@ -106,7 +106,7 @@
       }
       // 5) 自定义字段匹配
       if (!fieldKey) {
-        const cm = AS.matcher.matchCustomField(ctx, profile);
+        const cm = AS.matcher.matchCustomField(ctx, profile, field.el);
         if (cm) {
           const vals = getValues(cm.fieldKey);
           const cv = takeValue(vals);

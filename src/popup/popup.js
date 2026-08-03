@@ -252,6 +252,15 @@
         showStatus('error', '无法在此页面捕获');
       }
     });
+    $('learnFormatBtn').addEventListener('click', async () => {
+      if (!currentTab) return;
+      try {
+        await chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT_FORMAT' });
+        window.close();
+      } catch (e) {
+        showStatus('error', '无法在此页面捕获格式');
+      }
+    });
     $('floatBtn').addEventListener('click', async () => {
       if (!currentTab) return;
       const ok = await ensureContentScript();

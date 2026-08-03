@@ -293,8 +293,7 @@
           confidence: 50, level: 'format',
           label: clean, options, ctype: field.type,
           selector: genSelectorWithPath(el), module: detectModule(el), frame: 'top',
-        });
-      } catch (e) { /* ignore */ }
+        });      } catch (e) { /* ignore */ }
     }
     return items;
   }
