@@ -837,9 +837,57 @@
         await new Promise((res) => setTimeout(res, 120));
       }
       safeToast(`🤖 AI 智能填充完成: ${filled}/${plan.length} 个字段`, 5000);
-      setFillState('done', `AI 填充完成: ${filled}/${plan.length}`);
-      reportProgress('done', { filled, skipped: 0, unmatched: plan.length - filled, errors: 0, notEffective: 0, ai: true });
-      return { ok: true, filled, total: plan.length };
+      // AI 核对改写: 对照信息库核对已填字段(错填/漏填), 返回修正项并应用
+      let reviewed = 0;
+      try {
+        const filledFields = [];
+        const allFields = AS.scanner.scan();
+        for (const f of allFields) {
+          try {
+            const ctx = AS.matcher.buildContext(f.el);
+            if (!ctx.visible || f.el.readOnly) continue;
+            const val = f.type === 'select' && f.el.selectedIndex > 0 ? f.el.options[f.el.selectedIndex].textContent : f.el.value;
+            if (!val || String(val).trim() === '' || /请选择|请输入/.test(String(val))) continue;
+            filledFields.push({ label: (ctx.labelText || ctx.placeholder || ctx.prevText || (ctx.rowText ? String(ctx.rowText).split(/[\s*:：|｜]/)[0].slice(0, 12) : '') || '').slice(0, 40), value: String(val).trim().slice(0, 60) });
+          } catch (e) { /* ignore */ }
+        }
+        if (filledFields.length) {
+          setFillState('ai', 'AI 核对已填字段...');
+          reportProgress('ai', { total: filledFields.length });
+          const review = await AS.ai.reviewFilled(filledFields, profile, companyPos);
+          for (const item of review) {
+            try {
+              const target = infos.find((f) => AS.fuzzy.containsAny(f.label, [item.field]) || AS.fuzzy.similarity(f.label, item.field) > 0.6);
+              if (!target) continue;
+              let tEl2 = target.el;
+              if (!tEl2.isConnected) {
+                try {
+                  const ph = String(tEl2.placeholder || '');
+                  if (ph) tEl2 = document.querySelector(tEl2.tagName.toLowerCase() + '[placeholder="' + ph.replace(/"/g, '\\"') + '"]') || tEl2;
+                } catch (e) { /* ignore */ }
+              }
+              let rr = null;
+              if (tEl2.tagName === 'SELECT') {
+                const i2 = Array.from(tEl2.options).findIndex((o) => (o.textContent || '').trim() === String(item.correct).trim());
+                if (i2 >= 0) { tEl2.selectedIndex = i2; tEl2.dispatchEvent(new Event('change', { bubbles: true })); rr = { ok: true, action: 'filled' }; }
+              }
+              if (!rr) rr = await AS.filler.fillField({ el: tEl2, type: tEl2.tagName === 'TEXTAREA' ? 'textarea' : tEl2.tagName === 'SELECT' ? 'select' : 'text' }, item.correct, { conflictMode: 'overwrite', typing: false, photoDataUrl: '' });
+              if (rr && rr.ok && rr.action === 'filled') {
+                reviewed++;
+                AS.overlay.highlight(tEl2, 'af-highlight-ok');
+              }
+            } catch (e) { /* ignore */ }
+          }
+        }
+      } catch (e) { LOG().warn('content', 'ai review failed', e && e.message || e); }
+      if (reviewed > 0) {
+        safeToast(`🤖 AI 核对修正 ${reviewed} 处(依据信息库)`, 5000);
+        setFillState('done', `AI 填充完成: ${filled}/${plan.length} · 核对修正 ${reviewed}`);
+      } else {
+        setFillState('done', `AI 填充完成: ${filled}/${plan.length}`);
+      }
+      reportProgress('done', { filled, skipped: 0, unmatched: plan.length - filled, errors: 0, notEffective: 0, ai: true, reviewed });
+      return { ok: true, filled, total: plan.length, reviewed };
     } catch (e) {
       LOG().warn('content', 'aiFillAll failed', e && e.message || e);
       safeToast('🤖 AI 填充异常: ' + (e && e.message || e).slice(0, 80), 6000);

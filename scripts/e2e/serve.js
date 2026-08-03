@@ -162,8 +162,24 @@ const server = http.createServer((req, res) => {
       const qMark = question.match(/开放题:\s*([^\n]+)/);
       const fMark = question.match(/字段:\s*([^\n]+)/);
       const planMark = question.match(/表单字段\(每行一个\):\s*([\s\S]*?)\n\n输出格式/);
+      const reviewMark = question.match(/表单字段:\s*([\s\S]*?)\n\n输出格式/);
       let content = '';
-      if (planMark) {
+      if (reviewMark) {
+        // AI 核对改写: 返回修正项(测试: 若字段值=籍贯但标签是所在地则修正)
+        try {
+          const lines = reviewMark[1].split('\n').map((l) => l.trim()).filter(Boolean);
+          const out = [];
+          lines.forEach((line) => {
+            const m = line.match(/^(.+?):\s*(.+)$/);
+            if (!m) return;
+            const label = m[1], val = m[2];
+            if ((label.includes('所在地') || label.includes('现居地')) && val.includes('江西')) {
+              out.push(label + '|杭州|信息库现居地为杭州');
+            }
+          });
+          content = out.join('\n') || 'OK';
+        } catch (e) { content = 'OK'; }
+      } else if (planMark) {
         // AI 托管批量规划(行格式): 返回 "序号|值" 每行
         try {
           const lines = planMark[1].split('\n').map((l) => l.trim()).filter(Boolean);

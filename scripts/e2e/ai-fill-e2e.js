@@ -141,6 +141,18 @@ const t = (name, ok, extra) => { if (ok) { pass++; console.log('  ✔', name); }
   t('AI 返回值本地填入(民族=汉族)', aiRes.ethnicity === '汉族', aiRes.ethnicity);
   // 政治面貌若被 AI 规划则必须填对; 偶发未被规划(测试 mock 行解析)时接受空
   t('AI 返回值本地填入(政治面貌, 若被规划则必准)', !aiRes.political || aiRes.political === '共青团员', aiRes.political);
+
+  // AI 核对改写: 已填字段对照信息库修正(错填/漏填)
+  console.log('\n== AI 核对改写 ==');
+  const rv = await page.evaluate(async () => {
+    const out = {};
+    const profile = (await chrome.storage.local.get('af_profiles')).af_profiles[0];
+    const items = await AS.ai.reviewFilled([{ label: '所在地', value: '江西 上饶市' }], profile, '测试');
+    out.items = items;
+    return out;
+  }, 90000);
+  console.log('reviewFilled:', JSON.stringify(rv));
+  t('reviewFilled: 错填(所在地=籍贯)被核对修正为杭州', rv.items && rv.items.length >= 1 && rv.items[0].correct === '杭州', rv.items);
   // 隐私脱敏验证: 发给 AI 的摘要不含姓名/手机号/邮箱
   const mask = await page.evaluate(async () => {
     const profile = (await chrome.storage.local.get('af_profiles')).af_profiles[0];
