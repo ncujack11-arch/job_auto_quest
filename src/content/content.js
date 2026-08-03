@@ -811,6 +811,16 @@
         }
         const typeOf = (el) => (el.tagName === 'TEXTAREA' ? 'textarea' : el.tagName === 'SELECT' ? 'select' : 'text');
         let r = null;
+        const ph = String(tEl.placeholder || '').trim();
+        const inDateComp = (() => {
+          try {
+            let n = tEl.parentElement;
+            for (let i = 0; i < 6 && n; i++, n = n.parentElement) {
+              if (/date_info|month-range-select/.test(String(n.className || ''))) return true;
+            }
+          } catch (e) { /* ignore */ }
+          return false;
+        })();
         // select: 直接按 option 文本精确匹配设置(最准确, 避免连续填充交互干扰)
         if (tEl.tagName === 'SELECT') {
           const idx2 = Array.from(tEl.options).findIndex((o) => (o.textContent || '').trim() === String(item.value).trim() || (o.value || '').trim() === String(item.value).trim());
@@ -820,15 +830,35 @@
             r = { ok: true, action: 'filled' };
           }
         }
+        // 年月分列组件(date_info): 轻量写入年/月值(规避 focus 重置)
+        if (!r && inDateComp && (ph === '年' || ph === '月')) {
+          try {
+            const dv = AS.dates.parseDateStr(String(item.value));
+            if (dv && dv.y) {
+              const want = ph === '年' ? String(dv.y) : String(dv.m || 1).replace(/^0/, '');
+              const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+              setter.call(tEl, want);
+              tEl.dispatchEvent(new Event('input', { bubbles: true }));
+              tEl.dispatchEvent(new Event('change', { bubbles: true }));
+              r = { ok: true, action: 'filled' };
+            }
+          } catch (e) { /* ignore */ }
+        }
+        // 下拉组件(placeholder=请选择): 打开列表点击选择
+        if (!r && (ph === '请选择' || /^请选择/.test(ph))) {
+          const okP = await AS.filler.fillPanelSelect(tEl, item.value, 2);
+          if (okP) r = { ok: true, action: 'filled', detail: '面板选择' };
+        }
+        // 普通文本/组件兜底
         if (!r) r = await AS.filler.fillField({ el: tEl, type: typeOf(tEl) }, item.value, { conflictMode: 'overwrite', typing: false, photoDataUrl: '' });
-        if (!(r.ok && r.action === 'filled')) {
-          await new Promise((res) => setTimeout(res, 300));
-          // select 兜底: 打开列表点击选择
-          if (tEl.tagName === 'SELECT') {
-            const okP = await AS.filler.fillPanelSelect(tEl, item.value);
-            if (okP) { filled++; AS.overlay.highlight(tEl, 'af-highlight-ok'); await new Promise((res) => setTimeout(res, 120)); continue; }
+        // 生效校验兜底: 文本类值未生效(MOKA 受控组件) → 打开列表选择
+        if (r.ok && r.action === 'filled' && tEl.tagName === 'INPUT' && tEl.type === 'text') {
+          await new Promise((res) => setTimeout(res, 180));
+          if (String(tEl.value || '').trim() !== String(item.value).trim()) {
+            const okP2 = await AS.filler.fillPanelSelect(tEl, item.value, 1);
+            if (okP2) r = { ok: true, action: 'filled', detail: '面板选择兜底' };
+            else r = { ok: false, action: 'unmatched' };
           }
-          r = await AS.filler.fillField({ el: tEl, type: tEl.tagName === 'TEXTAREA' ? 'textarea' : tEl.tagName === 'SELECT' ? 'select' : 'text' }, item.value, { conflictMode: 'overwrite', typing: false, photoDataUrl: '' });
         }
         if (r.ok && r.action === 'filled') {
           filled++;

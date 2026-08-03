@@ -163,6 +163,9 @@ const server = http.createServer((req, res) => {
       const fMark = question.match(/字段:\s*([^\n]+)/);
       const planMark = question.match(/表单字段\(每行一个\):\s*([\s\S]*?)\n\n输出格式/);
       const reviewMark = question.match(/表单字段:\s*([\s\S]*?)\n\n输出格式/);
+      if (process.env.MOCK_DEBUG && /表单字段\(每行一个\)/.test(question)) {
+        console.log('[mock-debug] planMark:', !!planMark, 'reviewMark:', !!reviewMark, 'qlen:', question.length);
+      }
       let content = '';
       if (reviewMark) {
         // AI 核对改写: 返回修正项(测试: 若字段值=籍贯但标签是所在地则修正)
@@ -180,20 +183,23 @@ const server = http.createServer((req, res) => {
           content = out.join('\n') || 'OK';
         } catch (e) { content = 'OK'; }
       } else if (planMark) {
-        // AI 托管批量规划(行格式): 返回 "序号|值" 每行
+        // AI 托管批量规划(行格式): 模拟 AI 尽力给每个字段值(select→首选项, 其他→测试值)
         try {
           const lines = planMark[1].split('\n').map((l) => l.trim()).filter(Boolean);
-          const rules = [['民族', '汉族'], ['籍贯', '江西 上饶市 余干县'], ['政治面貌', '共青团员'], ['所在地', '杭州'], ['现居地', '杭州'], ['期望城市', '杭州'], ['期望工作地点', '杭州']];
+          const rules = [['民族', '汉族'], ['籍贯', '江西 上饶市 余干县'], ['政治面貌', '共青团员'], ['所在地', '杭州'], ['现居地', '杭州'], ['期望城市', '杭州'], ['期望工作地点', '杭州'], ['期望薪资', '面议'], ['当前薪资', '面议'], ['英语', 'CET-6'], ['语言', '普通话']];
           const out = [];
           lines.forEach((line) => {
-            const m = line.match(/^(\d+)\.\s*(.+?)(?:\s*\(选项:.*\))?$/);
+            const m = line.match(/^(\d+)\.\s*(.+?)(?:\s*\(选项:\s*([^)]*)\))?$/);
             if (!m) return;
             const idx = parseInt(m[1], 10);
             const label = m[2];
-            let value = '空';
+            const opts = m[3] ? m[3].split('/').filter(Boolean) : [];
+            let value = '';
             for (const [kw, v] of rules) {
               if (label.includes(kw)) { value = v; break; }
             }
+            if (!value && opts.length) value = opts[0];   // select 类: 取第一个选项
+            if (!value) value = '测试值';                    // 文本类: 模拟 AI 给值
             out.push(idx + '|' + value);
           });
           content = out.join('\n');
