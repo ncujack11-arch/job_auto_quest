@@ -451,9 +451,9 @@
       try {
         const ctxInfo = grabPageInfo();
         const companyPos = [ctxInfo.company, ctxInfo.position].filter(Boolean).join(' · ') || '未知';
+        // 1) 开放题: 逐题 AI 生成回答(结合脱敏信息库+公司岗位)
         for (const uf of plan.unmatchedFields) {
           try {
-            // 元素重定位: executePlan 填充其他字段后 React 可能重渲染替换元素(旧引用写不进)
             let targetEl = uf.el;
             if (!targetEl.isConnected) {
               try {
@@ -465,45 +465,91 @@
             }
             const uctx = AS.matcher.buildContext(targetEl);
             if (!uctx.visible || targetEl.readOnly || targetEl.disabled) continue;
-            const isOpen = AS.matcher.isOpenQuestionField(uctx);
-            if (!isOpen && !isAIFillable(uctx)) continue;
+            if (!AS.matcher.isOpenQuestionField(uctx)) continue;
             const label = (uctx.labelText || uctx.placeholder || uf.label || '开放题').slice(0, 60);
             setFillState('ai', `AI 生成: ${label.slice(0, 18)}...`);
             reportProgress('ai', { question: label });
-            let options = [];
-            if (targetEl.tagName === 'SELECT') {
-              options = Array.from(targetEl.options).map((o) => o.textContent).filter((t) => t && t.trim() && t !== '请选择');
-            }
-            const answer = isOpen
-              ? await AS.ai.generateOpenAnswer(label, profile, companyPos)
-              : await AS.ai.matchFromLibrary(label, options, profile, companyPos);
+            const answer = await AS.ai.generateOpenAnswer(label, profile, companyPos);
             if (!answer) continue;
             let rAI = await AS.filler.fillField({ el: targetEl, type: targetEl.tagName === 'TEXTAREA' ? 'textarea' : 'text' }, answer, opts);
             if (!(rAI.ok && rAI.action === 'filled')) {
-              // 偶发失败(页面重渲染等): 等待后重试一次
               await new Promise((r) => setTimeout(r, 300));
               rAI = await AS.filler.fillField({ el: targetEl, type: targetEl.tagName === 'TEXTAREA' ? 'textarea' : 'text' }, answer, opts);
             }
             if (rAI.ok && rAI.action === 'filled') {
               report.filled++;
-              report.infos.push({ label, detail: isOpen ? 'AI 自动作答' : 'AI 补充填写' });
+              report.infos.push({ label, detail: 'AI 自动作答' });
               AS.overlay.highlight(targetEl, 'af-highlight-ok');
               aiFilled++;
             }
           } catch (e) {
             aiFail++;
             aiFailMsg = e && e.message || String(e);
-            LOG().warn('content', 'ai fill failed', e && e.message || e);
+            LOG().warn('content', 'ai open answer failed', e && e.message || e);
           }
         }
-      } catch (e) { /* ignore */ }
+        // 2) 其他未匹配字段: AI 托管批量规划(完整信息库 → 全部字段填充值)
+        const aiFields = [];
+        for (const uf of plan.unmatchedFields) {
+          try {
+            const uctx = AS.matcher.buildContext(uf.el);
+            if (!uctx.visible || uf.el.readOnly || uf.el.disabled) continue;
+            if (AS.matcher.isOpenQuestionField(uctx)) continue;
+            if (!isAIFillable(uctx)) continue;
+            let options = [];
+            if (uf.el.tagName === 'SELECT') {
+              options = Array.from(uf.el.options).map((o) => o.textContent).filter((t) => t && t.trim() && t !== '请选择');
+            }
+            aiFields.push({
+              label: (uctx.labelText || uctx.placeholder || uf.label || '').slice(0, 40),
+              options,
+              el: uf.el,
+            });
+          } catch (e) { /* ignore */ }
+        }
+        if (aiFields.length) {
+          setFillState('ai', `AI 托管规划 ${aiFields.length} 个字段...`);
+          const plan = await AS.ai.planFill(aiFields.map((f) => ({ label: f.label, options: f.options })), profile, companyPos);
+          for (const item of plan) {
+            try {
+              // 按标签定位页面字段(模糊)
+              const target = aiFields.find((f) => AS.fuzzy.containsAny(f.label, [item.label]) || AS.fuzzy.similarity(f.label, item.label) > 0.6);
+              if (!target) continue;
+              let tEl = target.el;
+              if (!tEl.isConnected) {
+                try {
+                  const ph = String(tEl.placeholder || '');
+                  if (ph) tEl = document.querySelector(tEl.tagName.toLowerCase() + '[placeholder="' + ph.replace(/"/g, '\\"') + '"]') || tEl;
+                } catch (e) { /* ignore */ }
+              }
+              const rAI = await AS.filler.fillField({ el: tEl, type: tEl.tagName === 'TEXTAREA' ? 'textarea' : 'text' }, item.value, opts);
+              if (!(rAI.ok && rAI.action === 'filled')) {
+                await new Promise((r) => setTimeout(r, 300));
+                const r2 = await AS.filler.fillField({ el: tEl, type: tEl.tagName === 'TEXTAREA' ? 'textarea' : 'text' }, item.value, opts);
+                if (!(r2.ok && r2.action === 'filled')) continue;
+              }
+              report.filled++;
+              report.infos.push({ label: item.label, detail: 'AI 托管填充' });
+              AS.overlay.highlight(tEl, 'af-highlight-ok');
+              aiFilled++;
+            } catch (e) {
+              aiFail++;
+              aiFailMsg = e && e.message || String(e);
+            }
+          }
+        }
+      } catch (e) {
+        aiFail++;
+        aiFailMsg = e && e.message || String(e);
+        LOG().warn('content', 'ai fill failed', e);
+      }
       // AI 结果反馈: 用户明确知道 AI 做了什么/为什么没做
       if (aiFilled > 0) {
-        safeToast(`🤖 AI 已补充填写 ${aiFilled} 个字段(从信息库匹配/开放题作答)`, 4000);
+        safeToast(`🤖 AI 已补充填写 ${aiFilled} 个字段(依据信息库)`, 4000);
       } else if (aiFail > 0) {
-        safeToast(`🤖 AI 调用失败(${aiFail} 次): ${aiFailMsg.slice(0, 80)} — 请检查 API Key/网络/模型名(配置页 → AI 工具 → 测试连接)`, 6000);
+        safeToast(`🤖 AI 调用失败: ${aiFailMsg.slice(0, 80)} — 请检查 API Key/网络/模型名(配置页 → AI 工具 → 测试连接)`, 6000);
       } else {
-        safeToast('🤖 AI: 未匹配字段均无可从信息库补充的内容(信息库缺值, 可先去信息库完善)', 5000);
+        safeToast('🤖 AI: 未匹配字段信息库均无对应值, 无补充(可先去信息库完善)', 5000);
       }
     }
 

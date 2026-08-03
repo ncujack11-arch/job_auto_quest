@@ -95,15 +95,28 @@
     return sum || '未填写';
   }
 
+  // 清洗 AI 返回的值: 去引号/换行取首行/去常见前缀(真实模型常带解释文字)
+  function cleanAIValue(raw) {
+    let v = String(raw || '').trim();
+    v = v.replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, '');
+    const firstLine = v.split(/\r?\n/)[0].trim();
+    if (firstLine) v = firstLine;
+    v = v.replace(/^(答案|答|填写内容|内容|值|匹配结果|匹配值|推荐值|根据(我的|您的)?信息|对应值|字段值)[:：\s]*/, '');
+    v = v.replace(/^['"“”‘’]+|['"“”‘’]+$/g, '').trim();
+    // 明显未匹配/跳过表述
+    if (/__SKIP__|无法|无对应|没有找到|未找到|不能确定|无法推断|跳过|暂无/i.test(v) && v.length < 20) return '';
+    return v;
+  }
+
   // 信息库智能匹配: 页面未填好的字段 → 从信息库中提取最匹配的真实值填入(绝不编造)
   // 返回 '' 表示信息库无对应值(跳过, 留空)
   async function matchFromLibrary(label, options, profile, context) {
     const summary = profileToSummary(profile);
     const prompt = [
       '你是网申表单填写助手。下面的表单字段没有自动填上, 请从「我的信息」中找到与该字段最匹配的值。',
-      '要求: 只能从「我的信息」中原样提取真实值(姓名/手机/邮箱/学校/城市等), 绝不编造、绝不修改;',
-      '若「我的信息」中有明确对应 → 直接输出该值(不要解释);',
-      '若没有明确对应(如信息库无此信息) → 只输出 __SKIP__。',
+      '要求: 只能从「我的信息」中原样提取真实值, 绝不编造、绝不修改、不要解释;',
+      '若「我的信息」中有明确对应 → 直接输出该值(一行, 不加任何前缀符号);',
+      '若没有明确对应 → 只输出 __SKIP__。',
       '',
       '我的信息: ' + summary,
       '公司/岗位: ' + (context || '未提供'),
@@ -113,9 +126,16 @@
       '输出: ',
     ].join('\n');
     try {
-      const r = await chat([{ role: 'user', content: prompt }], { maxTokens: 300, timeout: 60000, temperature: 0.1 });
-      const clean = (r || '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
-      if (!clean || clean === '__SKIP__' || clean.length > 120) return '';
+      const r = await chat([{ role: 'user', content: prompt }], { maxTokens: 120, timeout: 60000, temperature: 0.1 });
+      const clean = cleanAIValue(r);
+      if (!clean || clean.length > 60) return '';
+      // 校验: 若字段有选项, 返回值尽量贴近选项(防止模型输出解释)
+      if (options && options.length) {
+        const hit = options.find((o) => o && clean.includes(o));
+        if (hit) return hit;
+        const fuzzyHit = FUZZY() ? FUZZY().closest(clean, options, { minScore: 0.7 }) : null;
+        if (fuzzyHit && fuzzyHit.score >= 0.7) return options[fuzzyHit.index];
+      }
       return clean;
     } catch (e) {
       return '';
@@ -162,6 +182,77 @@
     }
   }
 
+  // AI 托管填充规划: 完整信息库 + 页面全部字段 → AI 一次性给出每字段填充值
+  // 返回: [{ label, value }]  (value 为空表示不填)
+  async function planFill(fieldsInfo, profile, context) {
+    const full = JSON.stringify(profile ? profile.data : {});
+    const fieldsJson = JSON.stringify(fieldsInfo || []);
+    const prompt = [
+      '你是网申表单填写助手(自动化代理)。请为下面的表单字段逐一给出填充值, 依据「我的完整信息」。',
+      '规则: ',
+      '1) 信息库有对应真实值(姓名/手机/邮箱/学校/专业/民族/籍贯/城市/时间/经历等) → 必须用信息库原值;',
+      '2) 描述/主观类字段(自我介绍/职业规划/自我评价/补充说明等) → 基于信息库合理撰写;',
+      '3) 信息库无对应且无法合理推断 → value 留空字符串;',
+      '4) 所有值必须真实/合理, 绝不编造虚假信息。',
+      '',
+      '我的完整信息: ' + full.slice(0, 5000),
+      '公司/岗位: ' + (context || '未提供'),
+      '',
+      '表单字段: ' + fieldsJson.slice(0, 4000),
+      '',
+      '输出: 严格 JSON 数组, 每个元素 {"label":"表单字段标签原文","value":"填充值"}, 无填充值则 value 为 ""。不要输出 JSON 以外的任何文字。',
+    ].join('\n');
+    try {
+      const r = await chat([{ role: 'user', content: prompt }], { maxTokens: 2500, timeout: 120000, temperature: 0.2 });
+      // 提取 JSON 数组(容忍前后文字)
+      const m = String(r || '').match(/\[[\s\S]*\]/);
+      if (!m) return [];
+      const list = JSON.parse(m[0]);
+      if (!Array.isArray(list)) return [];
+      return list
+        .map((it) => ({ label: String(it.label || '').trim(), value: String(it.value || '').trim() }))
+        .filter((it) => it.label && it.value);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // AI 核对改写: 填充完成后, 对照信息库核对已填字段(错填/漏填/格式), 返回修正项列表
+  // 返回: [{ field: 字段标签, correct: 信息库正确值, reason: 原因 }]
+  async function reviewFilled(fieldsInfo, profile, context) {
+    const summary = profileToSummary(profile);
+    const fieldLines = (fieldsInfo || []).map((f) => (f.label || '?') + ': ' + (f.value || '(空)')).join('\n');
+    const prompt = [
+      '你是网申表单填写助手。以下是网申表单当前已填写的字段, 以及「我的信息」(信息库, 真实可信)。',
+      '请逐项核对: 表单值与「我的信息」不一致 → 给出信息库中的正确值; 表单为空但信息库有对应 → 给出该值。',
+      '要求: 正确值必须来自「我的信息」, 绝不编造; 字段无法对应到信息库任何值则不改。',
+      '',
+      '我的信息: ' + summary,
+      '公司/岗位: ' + (context || '未提供'),
+      '',
+      '表单字段: ',
+      fieldLines.slice(0, 3000),
+      '',
+      '输出格式(严格, 每行一条, 用 | 分隔): ',
+      '字段标签|正确值|原因',
+      '如某字段无需修改则不输出; 全部正确只输出 OK。',
+    ].join('\n');
+    try {
+      const r = await chat([{ role: 'user', content: prompt }], { maxTokens: 500, timeout: 60000, temperature: 0.1 });
+      const lines = String(r || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && l !== 'OK' && l !== 'ok');
+      const items = [];
+      for (const line of lines) {
+        const parts = line.split('|').map((p) => cleanAIValue(p));
+        if (parts.length >= 2 && parts[0] && parts[1] && !/^(OK|ok|无|没有|无需)$/.test(parts[1])) {
+          items.push({ field: parts[0], correct: parts[1], reason: parts[2] || '' });
+        }
+      }
+      return items;
+    } catch (e) {
+      return [];
+    }
+  }
+
   // 经历定向改写: 基于岗位方向/JD 要点改写经历描述
   async function rewriteExperience(experience, target, extra) {
     const prompt = [
@@ -194,5 +285,5 @@
     return chat([{ role: 'user', content: prompt }], { maxTokens: 900 });
   }
 
-  AS.ai = { chat, test, rewriteExperience, simulateInterview, generateOpenAnswer, generateFieldValue, matchFromLibrary, profileToSummary, getConfig };
+  AS.ai = { chat, test, rewriteExperience, simulateInterview, generateOpenAnswer, generateFieldValue, matchFromLibrary, reviewFilled, planFill, cleanAIValue, profileToSummary, getConfig };
 })();

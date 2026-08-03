@@ -161,8 +161,23 @@ const server = http.createServer((req, res) => {
       } catch (e) { /* ignore */ }
       const qMark = question.match(/开放题:\s*([^\n]+)/);
       const fMark = question.match(/字段:\s*([^\n]+)/);
+      const planMark = question.match(/表单字段: (\[[\s\S]*\])/);
       let content = '';
-      if (qMark) {
+      if (planMark) {
+        // AI 托管批量规划: 返回每字段填充值(测试固定规则)
+        try {
+          const fields = JSON.parse(planMark[1]);
+          const rules = [['民族', '汉族'], ['籍贯', '江西 上饶市 余干县'], ['政治面貌', '共青团员'], ['所在地', '杭州'], ['现居地', '杭州'], ['期望城市', '杭州'], ['期望工作地点', '杭州']];
+          const list = fields.map((f) => {
+            let value = '';
+            for (const [kw, v] of rules) {
+              if ((f.label || '').includes(kw)) { value = v; break; }
+            }
+            return { label: f.label, value };
+          });
+          content = JSON.stringify(list);
+        } catch (e) { content = '[]'; }
+      } else if (qMark) {
         content = '这是AI根据我的信息生成的回答(针对: ' + qMark[1].trim() + '): 我热爱技术, 学习能力强, 具备扎实的专业基础与团队协作能力, 期待加入贵司共同成长。';
       } else if (fMark) {
         // 信息库智能匹配: 从 prompt 的「我的信息」里找对应值
