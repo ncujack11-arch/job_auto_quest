@@ -44,10 +44,14 @@ const FIELDS = {
   'education.degree': { labels: ['学历', '最高学历'], types: ['select'], pool: ['博士', '硕士', '本科', '大专'], entry: 'education' },
   'openQuestions.intro': { labels: ['自我介绍', '请做一下自我介绍', '个人简介'], types: ['textarea'], pool: ['热爱技术, 学习能力强, 团队协作好。', '责任心强, 追求极致, 持续学习。'] },
   'agreement.protocol': { labels: ['我已阅读并同意用户协议与隐私政策'], types: ['agree'], pool: [] },
+  // 小众/未知字段(不在信息库 schema, 用于格式捕获验证)
+  'uncommon.referee': { labels: ['推荐人'], types: ['text'], pool: [] },
+  'uncommon.source': { labels: ['招聘信息来源'], types: ['text'], pool: [] },
+  'uncommon.currentSalary': { labels: ['当前薪资'], types: ['text'], pool: [] },
 };
 
 // 每次固定取这些字段: 必含 6 个(fixed) + 随机池选 7-9 个
-const FIXED = ['basic.name', 'basic.phone', 'basic.email', 'basic.gender', 'education.school', 'openQuestions.intro', 'intent.expectedSalary', 'agreement.protocol'];
+const FIXED = ['basic.name', 'basic.phone', 'basic.email', 'basic.gender', 'education.school', 'openQuestions.intro', 'intent.expectedSalary', 'agreement.protocol', 'uncommon.referee', 'uncommon.currentSalary'];
 const RANDOM_POOL = Object.keys(FIELDS).filter((k) => !FIXED.includes(k));
 
 function esc(s) { return String(s).replace(/"/g, '&quot;'); }

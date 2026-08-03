@@ -272,6 +272,9 @@
         if (!clean || clean.length < 2 || IGNORE_LABELS.test(clean)) continue;
         // 国际区号前缀框(如 +86)不收录
         if (/^\+?\d{1,4}$/.test(clean)) continue;
+        // 噪音字段不收录: 验证码 / 协议勾选 / 简历同步类
+        if (/(验证码|图形码|校验码|captcha|verify)/i.test(labelText)) continue;
+        if (/(同步更新|在线简历|我已阅读|同意.{0,10}(协议|政策|条款)|用户协议|隐私政策|声明)/i.test(labelText)) continue;
         const key = FZ.normalize(clean).slice(0, 20);
         if (!key || seen.has(key)) continue;
         seen.add(key);

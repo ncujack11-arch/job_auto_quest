@@ -67,7 +67,9 @@
     });
 
     for (const it of flatItems) {
-      if (!it || it.pageValue === undefined || it.pageValue === null || String(it.pageValue).trim() === '') { skipped++; continue; }
+      const isEmpty = !it || it.pageValue === undefined || it.pageValue === null || String(it.pageValue).trim() === '';
+      const isFormatCustom = it && it.type === 'custom' && it.level === 'format';
+      if (isEmpty && !isFormatCustom) { skipped++; continue; }
       // 一致项默认不写(除非 force)
       if (it.state === 'same' && !o.force) { same++; continue; }
       if (it.type === 'openQuestions') {
