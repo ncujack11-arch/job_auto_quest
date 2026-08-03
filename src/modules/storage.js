@@ -40,7 +40,7 @@
     photoDataUrl: '',            // 证件照 dataURL(可选, 用于自动上传)
     refCodes: [],                // 内推码库 [{host, code}]
     autoLock: true,              // 闲置 5 分钟自动锁定(清除会话密钥)
-    ai: { enabled: false, endpoint: 'https://api.deepseek.com', apiKey: '', model: 'deepseek-chat', openQuestionAuto: true, openQuestionTimeout: 60 },  // 大模型(DeepSeek/OpenAI 兼容)开放题自动作答
+    ai: { enabled: true, endpoint: 'https://api.deepseek.com', apiKey: '', model: 'deepseek-chat', openQuestionAuto: true, openQuestionTimeout: 60 },  // 大模型(DeepSeek 官方/OpenAI 兼容): 开放题与未填字段 AI 自动补充; 未填 Key 时自动跳过不影响填充
     logLevel: 'info',
     encryption: { enabled: false, salt: '', iterations: 100000, passwordHash: '', hint: '' },
   };
@@ -266,8 +266,19 @@
       // v1.12.11 起默认关闭(一键直达) — 无条件跟随新默认, 需要预览可在设置页重新开启
       if (s.previewMode === true) {
         s.previewMode = false;
-        s.__v = '1.12.11';
         migrated = true;
+      }
+      // AI 迁移: 本地 Ollama 端点 → DeepSeek 官方(用户要求); 已配置 Key 的自动启用
+      if (s.ai && typeof s.ai === 'object') {
+        if (String(s.ai.endpoint || '').includes('11434')) {
+          s.ai.endpoint = 'https://api.deepseek.com';
+          if (!s.ai.model || s.ai.model.includes('qwen')) s.ai.model = 'deepseek-chat';
+          migrated = true;
+        }
+        if (s.ai.apiKey && !s.ai.enabled) {
+          s.ai.enabled = true;
+          migrated = true;
+        }
       }
     }
     if (migrated) await set(KEYS.SETTINGS, s);

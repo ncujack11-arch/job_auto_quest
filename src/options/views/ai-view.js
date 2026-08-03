@@ -88,6 +88,23 @@
     form.appendChild(oqItem);
 
     cfgCard.appendChild(form);
+    // DeepSeek 官方一键配置(用户要求: 默认启用官方平台 API)
+    const dsBtn = UI().el('button', {
+      class: 'btn sm', text: '⚡ 一键配置 DeepSeek 官方', onclick: async () => {
+        settings.ai = Object.assign({}, settings.ai || {}, {
+          enabled: true, endpoint: 'https://api.deepseek.com', model: 'deepseek-chat', openQuestionAuto: settings.ai && settings.ai.openQuestionAuto !== undefined ? settings.ai.openQuestionAuto : true,
+        });
+        await AS.storage.saveSettings(settings);
+        epInput.value = 'https://api.deepseek.com';
+        mdInput.value = 'deepseek-chat';
+        enCheck.checked = true;
+        UI().toast('已指向 DeepSeek 官方, 请在上方填写你的 API Key 后测试连接', 'success');
+      },
+    });
+    cfgCard.appendChild(UI().el('div', { class: 'view-sub', style: 'margin-top:8px' }, [
+      UI().el('span', { text: 'DeepSeek 官方: 去 platform.deepseek.com 创建 API Key(sk-开头), 填入上方「API Key」框即可, 密钥仅存本地浏览器。' }),
+      dsBtn,
+    ]));
     const testBtn = UI().el('button', {
       class: 'btn', text: '🔌 测试连接', onclick: async (e) => {
         testBtn.disabled = true;

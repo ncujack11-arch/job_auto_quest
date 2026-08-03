@@ -309,10 +309,12 @@ load('options/options.js');
   // ===== E. AI 工具 =====
   console.log('== AI 工具视图 ==');
   location.hash = '#/ai';
+  // 先关闭 AI(默认已启用, 验证未启用引导需显式关闭)
+  await AS.storage.saveSettings({ ai: { enabled: false, endpoint: 'https://api.deepseek.com', model: 'deepseek-chat' } });
   await AS.optionsUI.route();
   await delay(30);
   view = global._idMap['view'];
-  t('AI 视图渲染(配置卡片)', (view.textContent || '').includes('本地大模型配置'));
+  t('AI 视图渲染(配置卡片)', (view.textContent || '').includes('服务地址'));
   t('AI 未启用时显示引导', (view.textContent || '').includes('大模型未启用'));
   // 启用后显示功能卡片
   await AS.storage.saveSettings({ ai: { enabled: true, endpoint: 'http://127.0.0.1:11434', model: 'test' } });
