@@ -56,6 +56,7 @@
     'src/utils/dates.js',
     'src/utils/matcher.js',
     'src/modules/fill-engine.js',
+    'src/modules/learn-save.js',
     'src/content/scanner.js',
     'src/content/capture.js',
     'src/content/filler.js',

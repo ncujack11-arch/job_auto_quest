@@ -256,9 +256,9 @@
     for (const field of fields) {
       try {
         const el = field.el;
-        // 有值字段 → 交给已填捕获, 格式捕获只收空字段
+        // 未匹配库字段的字段格式一律收录(无论字段是否有值; 有值顺带记录, 无值留待填写)
         const v = getValue(field);
-        if (v && v.value && String(v.value).trim()) continue;
+        const hasValue = v && v.value && String(v.value).trim();
         const ctx = AS.matcher.buildContext(el);
         if (!ctx.visible || ctx.readonly) continue;
         // 开放题不收录格式
@@ -289,7 +289,8 @@
         }
         items.push({
           type: 'custom', fieldKey: 'custom.' + key, key,
-          pageValue: '', state: 'new', confidence: 50, level: 'format',
+          pageValue: hasValue ? v.value : '', state: hasValue ? (customs.some((x) => x.key === key && String(x.value) === String(v.value)) ? 'same' : 'new') : 'new',
+          confidence: 50, level: 'format',
           label: clean, options, ctype: field.type,
           selector: genSelectorWithPath(el), module: detectModule(el), frame: 'top',
         });

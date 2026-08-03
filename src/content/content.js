@@ -624,18 +624,18 @@
   async function collectEmptyFormat() {
     try {
       const profile = await AS.storage.getActiveProfile();
-      if (!profile) { AS.overlay.toast('信息库为空, 请先在配置页创建方案'); return; }
+      if (!profile) { AS.overlay.toast('信息库为空, 请先在配置页创建方案', 3000); return; }
       const rule = await AS.storage.getSiteRuleForHost(location.hostname);
       const items = await AS.capture.collectEmptyFields(profile, { rule });
-      if (!items.length) { AS.overlay.toast('没有可捕获的空字段格式(均已识别或已有值)', 'info'); return; }
+      if (!items.length) { AS.overlay.toast('没有可捕获的空字段格式(均已识别或已有值)', 3000); return; }
       const r = await AS.learnSave.save(profile, items, { sourceHost: location.hostname });
       // 可见反馈: 结果面板展示捕获清单(标签/类型/数量), 用户直接看到效果
       AS.overlay.showFormatResult(items);
-      AS.overlay.toast(`🧩 已捕获 ${items.length} 个表单格式到信息库(自定义字段, 可去信息库填写)`, 'success', 4000);
+      AS.overlay.toast(`🧩 已捕获 ${items.length} 个表单格式到信息库(自定义字段, 可去信息库填写)`, 4000);
       chrome.runtime.sendMessage({ type: 'AF_LEARN_SAVE_RESULT', payload: r }).catch(() => {});
     } catch (e) {
       LOG().warn('content', 'collect empty format failed', e);
-      AS.overlay.toast('捕获失败: ' + (e && e.message || e), 'error');
+      AS.overlay.toast('捕获失败: ' + (e && e.message || e), 4000);
     }
   }
 

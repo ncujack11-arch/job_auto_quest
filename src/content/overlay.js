@@ -671,7 +671,7 @@
       addRow('📋', '记录本次投递', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_RECORD_NOW' }); });
       addRow('📄', '记录本页 JD 快照', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_RECORD_JD' }); });
       addRow('📥', '捕获页面已填内容', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT' }); });
-      addRow('🧩', '捕获表单格式(空字段)', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT_FORMAT' }); });
+      addRow('🧩', '捕获表单格式入库', () => { togglePanel(false); chrome.runtime.sendMessage({ type: 'AF_LEARN_COLLECT_FORMAT' }); });
       panel.appendChild(head);
       panel.appendChild(body);
       if (floatState.x !== null) {
