@@ -434,18 +434,22 @@
       rounds++;
     }
 
-    // AI 补充填写(设置开启时): 一键填充覆盖不到的字段 → 大模型结合信息库+公司岗位生成
-    // 安全规则: 除 姓名/手机号/验证码/证件照 外均可 AI 尝试(模型无真实依据时输出 __SKIP__ 跳过, 不会乱填)
+    // AI 补充填写(设置开启时): 仅「主观描述类」字段由 AI 生成(开放题/介绍/评价/规划等)
+    // 事实类字段(姓名/手机/邮箱/证件/学校/专业/公司/城市/薪资/时间等)绝不 AI 编造 — 信息库有则精确填, 无则留空由用户填
     const isAIFillable = (ctx) => {
       try {
         if (AS.matcher.isOpenQuestionField(ctx)) return true;
         const text = (ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.prevText + ' ' + ctx.rowText);
-        // 绝不 AI 生成: 姓名 / 手机号 / 验证码 / 证件照
-        if (/(姓名|真实姓名|名字|手机|手机号|电话号码|电话|联系电话|验证码|图形码|证件照|照片)/i.test(text)) return false;
-        return true;
+        // 事实/硬信息类: 绝不 AI 生成(防止编造履历/联系方式)
+        if (/(姓名|真实姓名|名字|手机|手机号|电话号码|电话|联系电话|邮箱|email|身份证|证件号|出生|生日|日期|时间|年龄|籍贯|民族|政治面貌|户口|地址|验证码|图形码|证件照|照片|学校|院校|毕业院校|专业|学历|学位|公司|单位|职位|岗位|薪资|薪酬|工资|待遇|城市|地点|base|证书|奖项|荣誉|经历|实习|工作内容|职责|至今|推荐人|来源|语言|成绩|GPA|排名|英文|简历|resume|key)/i.test(text)) return false;
+        // 主观描述类: 可 AI 生成
+        if (/(介绍|评价|总结|描述|规划|期望|优势|劣势|心得|意愿|说明|想法|认识|理解|特长|爱好|自述|补充|目标|职业规划|自我评价|原因|理由|感想|收获|技能|能力|自我)/i.test(text)) return true;
+        return false;
       } catch (e) { return false; }
     };
     if (settings.ai && settings.ai.enabled && settings.ai.openQuestionAuto !== false) {
+      let aiFilled = 0;
+      let aiSkipped = 0;
       try {
         const ctxInfo = grabPageInfo();
         const companyPos = [ctxInfo.company, ctxInfo.position].filter(Boolean).join(' · ') || '未知';
@@ -464,7 +468,7 @@
             const uctx = AS.matcher.buildContext(targetEl);
             if (!uctx.visible || targetEl.readOnly || targetEl.disabled) continue;
             const isOpen = AS.matcher.isOpenQuestionField(uctx);
-            if (!isOpen && !isAIFillable(uctx)) continue;
+            if (!isOpen && !isAIFillable(uctx)) { aiSkipped++; continue; }
             const label = (uctx.labelText || uctx.placeholder || uf.label || '开放题').slice(0, 60);
             setFillState('ai', `AI 生成: ${label.slice(0, 18)}...`);
             reportProgress('ai', { question: label });
@@ -486,13 +490,19 @@
               report.filled++;
               report.infos.push({ label, detail: isOpen ? 'AI 自动作答' : 'AI 补充填写' });
               AS.overlay.highlight(targetEl, 'af-highlight-ok');
-              safeToast(`🤖 AI 已${isOpen ? '作答' : '补充'}: ${label.slice(0, 16)}...`, 3000);
+              aiFilled++;
             }
           } catch (e) {
             LOG().warn('content', 'ai fill failed', e && e.message || e);
           }
         }
       } catch (e) { /* ignore */ }
+      // AI 结果反馈: 用户明确知道 AI 做了什么/为什么没做
+      if (aiFilled > 0) {
+        safeToast(`🤖 AI 已补充填写 ${aiFilled} 个字段(开放题/描述类)`, 4000);
+      } else {
+        safeToast('🤖 AI: 本页无可补充的开放题/描述类字段(事实信息如姓名/学校/薪资等 AI 不会编造, 请在信息库填写)', 5000);
+      }
     }
 
     await finish(snapshots, unmatchedEls, !isAuto);
