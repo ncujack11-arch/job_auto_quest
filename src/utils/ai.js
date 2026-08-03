@@ -65,13 +65,14 @@
     return !!r;
   }
 
-  // 信息库摘要: 供 AI 生成回答时参考(基本信息/教育/实习/项目/技能/开放题已有答案)
+  // 信息库摘要: 供 AI 生成回答时参考(学业/经历/技能等)
+  // 隐私脱敏: 姓名/手机号/邮箱/身份证等身份与联系方式绝不发送给 AI(仅本地规则填充使用)
   function profileToSummary(profile) {
     if (!profile || !profile.data) return '未填写';
     const d = profile.data;
     const parts = [];
     const b = d.basic || {};
-    const bItems = [['姓名', b.name], ['手机', b.phone], ['邮箱', b.email], ['学校', b.school], ['学历', b.degree], ['专业', b.major], ['籍贯', b.nativePlace], ['现居地', b.currentLocation], ['政治面貌', b.politicalStatus], ['民族', b.ethnicity], ['出生日期', b.birthday]];
+    const bItems = [['学校', b.school], ['学历', b.degree], ['专业', b.major], ['籍贯', b.nativePlace], ['现居地', b.currentLocation], ['政治面貌', b.politicalStatus], ['民族', b.ethnicity], ['出生日期', b.birthday]];
     bItems.forEach(([k, v]) => { if (v) parts.push(k + ':' + v); });
     (d.education || []).forEach((e, i) => {
       if (e && (e.school || e.major)) parts.push('教育' + (i + 1) + ':' + [e.school, e.major, e.degree, e.eduStart && e.eduEnd ? e.eduStart + '~' + e.eduEnd : ''].filter(Boolean).join(' '));
@@ -88,8 +89,37 @@
     if (sk.awards) parts.push('获奖:' + sk.awards);
     const intro = (d.openQuestions || []).find((q) => /自我|介绍/.test(q.question || ''));
     if (intro && intro.answer) parts.push('自我介绍:' + String(intro.answer).slice(0, 300));
-    const sum = parts.join('; ').slice(0, 1200);
+    let sum = parts.join('; ').slice(0, 1200);
+    // 兜底脱敏: 11 位手机号 / 邮箱 一律遮蔽(防经历文本或开放题答案中夹带)
+    sum = sum.replace(/1[3-9]\d{9}/g, '***').replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '***');
     return sum || '未填写';
+  }
+
+  // 信息库智能匹配: 页面未填好的字段 → 从信息库中提取最匹配的真实值填入(绝不编造)
+  // 返回 '' 表示信息库无对应值(跳过, 留空)
+  async function matchFromLibrary(label, options, profile, context) {
+    const summary = profileToSummary(profile);
+    const prompt = [
+      '你是网申表单填写助手。下面的表单字段没有自动填上, 请从「我的信息」中找到与该字段最匹配的值。',
+      '要求: 只能从「我的信息」中原样提取真实值(姓名/手机/邮箱/学校/城市等), 绝不编造、绝不修改;',
+      '若「我的信息」中有明确对应 → 直接输出该值(不要解释);',
+      '若没有明确对应(如信息库无此信息) → 只输出 __SKIP__。',
+      '',
+      '我的信息: ' + summary,
+      '公司/岗位: ' + (context || '未提供'),
+      '字段: ' + label,
+      (options && options.length ? '可选值(若字段有选项, 优先从选项中匹配): ' + options.join(' / ') : ''),
+      '',
+      '输出: ',
+    ].join('\n');
+    try {
+      const r = await chat([{ role: 'user', content: prompt }], { maxTokens: 300, timeout: 60000, temperature: 0.1 });
+      const clean = (r || '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
+      if (!clean || clean === '__SKIP__' || clean.length > 120) return '';
+      return clean;
+    } catch (e) {
+      return '';
+    }
   }
 
   // 开放题自动作答: 结合信息库与公司/岗位上下文生成回答
@@ -164,5 +194,5 @@
     return chat([{ role: 'user', content: prompt }], { maxTokens: 900 });
   }
 
-  AS.ai = { chat, test, rewriteExperience, simulateInterview, generateOpenAnswer, profileToSummary, getConfig };
+  AS.ai = { chat, test, rewriteExperience, simulateInterview, generateOpenAnswer, generateFieldValue, matchFromLibrary, profileToSummary, getConfig };
 })();

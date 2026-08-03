@@ -434,17 +434,14 @@
       rounds++;
     }
 
-    // AI 补充填写(设置开启时): 仅「主观描述类」字段由 AI 生成(开放题/介绍/评价/规划等)
-    // 事实类字段(姓名/手机/邮箱/证件/学校/专业/公司/城市/薪资/时间等)绝不 AI 编造 — 信息库有则精确填, 无则留空由用户填
+    // AI 智能补充填写(设置开启时): 页面未填好的字段 → 大模型从「信息库」中提取最匹配的真实值填入
+    // 开放题 → AI 结合信息库生成回答; 其他字段 → AI 从信息库匹配真实值(绝不编造, 信息库无则跳过)
+    // 仅排除: 验证码 / 证件照 / 密码 类(无法也不应自动处理)
     const isAIFillable = (ctx) => {
       try {
-        if (AS.matcher.isOpenQuestionField(ctx)) return true;
         const text = (ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.prevText + ' ' + ctx.rowText);
-        // 事实/硬信息类: 绝不 AI 生成(防止编造履历/联系方式)
-        if (/(姓名|真实姓名|名字|手机|手机号|电话号码|电话|联系电话|邮箱|email|身份证|证件号|出生|生日|日期|时间|年龄|籍贯|民族|政治面貌|户口|地址|验证码|图形码|证件照|照片|学校|院校|毕业院校|专业|学历|学位|公司|单位|职位|岗位|薪资|薪酬|工资|待遇|城市|地点|base|证书|奖项|荣誉|经历|实习|工作内容|职责|至今|推荐人|来源|语言|成绩|GPA|排名|英文|简历|resume|key)/i.test(text)) return false;
-        // 主观描述类: 可 AI 生成
-        if (/(介绍|评价|总结|描述|规划|期望|优势|劣势|心得|意愿|说明|想法|认识|理解|特长|爱好|自述|补充|目标|职业规划|自我评价|原因|理由|感想|收获|技能|能力|自我)/i.test(text)) return true;
-        return false;
+        if (/(验证码|图形码|校验码|captcha|密码|password|证件照|照片|简历文件|resume|上传|key)/i.test(text)) return false;
+        return true;
       } catch (e) { return false; }
     };
     if (settings.ai && settings.ai.enabled && settings.ai.openQuestionAuto !== false) {
@@ -478,7 +475,7 @@
             }
             const answer = isOpen
               ? await AS.ai.generateOpenAnswer(label, profile, companyPos)
-              : await AS.ai.generateFieldValue(label, options, profile, companyPos);
+              : await AS.ai.matchFromLibrary(label, options, profile, companyPos);
             if (!answer) continue;
             let rAI = await AS.filler.fillField({ el: targetEl, type: targetEl.tagName === 'TEXTAREA' ? 'textarea' : 'text' }, answer, opts);
             if (!(rAI.ok && rAI.action === 'filled')) {

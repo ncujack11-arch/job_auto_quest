@@ -162,7 +162,21 @@ const server = http.createServer((req, res) => {
       if (qMark) {
         content = '这是AI根据我的信息生成的回答(针对: ' + qMark[1].trim() + '): 我热爱技术, 学习能力强, 具备扎实的专业基础与团队协作能力, 期待加入贵司共同成长。';
       } else if (fMark) {
-        content = '基于我的信息生成的补充(字段: ' + fMark[1].trim() + '): 职业规划聚焦技术深耕与持续成长, 希望在团队中承担核心研发工作。';
+        // 信息库智能匹配: 从 prompt 的「我的信息」里找对应值
+        const info = question.match(/我的信息: ([^\n]+)/);
+        const field = fMark[1].trim();
+        const infoText = info ? info[1] : '';
+        let matched = '';
+        const rules = [
+          [/民族/, () => (infoText.match(/民族:([^;]+)/) || [])[1]],
+          [/籍贯/, () => (infoText.match(/籍贯:([^;]+)/) || [])[1]],
+          [/政治面貌/, () => (infoText.match(/政治面貌:([^;]+)/) || [])[1]],
+          [/期望城市|期望工作地点/, () => (infoText.match(/现居地:([^;]+)/) || [])[1]],
+        ];
+        for (const [re, fn] of rules) {
+          if (re.test(field)) { matched = (fn() || '').trim(); if (matched) break; }
+        }
+        content = matched ? matched : '__SKIP__';
       } else {
         content = 'ok';
       }
