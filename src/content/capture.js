@@ -258,7 +258,7 @@
         const el = field.el;
         // 有值字段 → 交给已填捕获, 格式捕获只收空字段
         const v = getValue(field);
-        if (v && String(v).trim()) continue;
+        if (v && v.value && String(v.value).trim()) continue;
         const ctx = AS.matcher.buildContext(el);
         if (!ctx.visible || ctx.readonly) continue;
         // 开放题不收录格式
@@ -270,6 +270,8 @@
         const labelText = String(ctx.labelText || ctx.placeholder || ctx.prevText || '').replace(/\s+/g, ' ').trim();
         const clean = labelText.replace(/^(请输入|请填写|请选择|请填入)/, '').replace(/\*+$/, '').trim().slice(0, 20);
         if (!clean || clean.length < 2 || IGNORE_LABELS.test(clean)) continue;
+        // 国际区号前缀框(如 +86)不收录
+        if (/^\+?\d{1,4}$/.test(clean)) continue;
         const key = FZ.normalize(clean).slice(0, 20);
         if (!key || seen.has(key)) continue;
         seen.add(key);

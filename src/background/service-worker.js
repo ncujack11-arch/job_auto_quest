@@ -376,6 +376,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
     }
 
+    case 'AF_LEARN_COLLECT_FORMAT': {
+      // 捕获表单格式(空字段): 转发给当前活动标签页
+      getActiveTab().then((tab) => {
+        if (!tab) return;
+        ensureInjected(tab.id).then((ok) => {
+          if (ok) chrome.tabs.sendMessage(tab.id, { type: 'AF_LEARN_COLLECT_FORMAT' }).catch(() => {});
+        });
+      });
+      break;
+    }
+
     case 'AF_ENSURE_INJECTED': {
       Promise.resolve().then(async () => {
         try {

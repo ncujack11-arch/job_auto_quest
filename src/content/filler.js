@@ -274,7 +274,8 @@
       let best = null, bestScore = 0;
       for (let i = 0; i < 8 && !best; i++) {
         await sleep(250);
-        const items = document.querySelectorAll('[role="option"],[role="listbox"] li,[role="listbox"] [class*="option"],.el-select-dropdown__item,.ant-select-item-option,[class*="dropdown"] li,[class*="select"] [class*="item"],[class*="dropdown-menu"] [class*="item"],[class*="option-item"],[class*="list-item"]');
+        // 选择器覆盖 MOKA sd-Menu / sd-Select / ElementUI / AntD / role=option
+        const items = document.querySelectorAll('[class*="Menu-content-item"],[class*="common-item"],[role="option"],[role="listbox"] li,[role="listbox"] [class*="option"],.el-select-dropdown__item,.ant-select-item-option,[class*="dropdown"] li,[class*="select"] [class*="item"],[class*="dropdown-menu"] [class*="item"],[class*="option-item"],[class*="list-item"]');
         items.forEach((it) => {
           const t = it.textContent || '';
           const hit = FUZZY().closest(String(value), [t], { minScore: 0.6, aliases: VALUE_ALIASES[String(value)] ? { [value]: VALUE_ALIASES[String(value)] } : undefined });
@@ -292,7 +293,10 @@
         await sleep(200);
         return true;
       }
-      // 无匹配项: 恢复已输入文本(值优先; 不派发 Escape, 避免误清其他字段输入, 菜单由后续点击自然关闭)
+      // 无匹配项: 尝试点击打开列表并点选目标(部分系统不靠搜索过滤, 直接列表选择)
+      const okList = await clickListOption(input, String(value));
+      if (okList) return true;
+      // 恢复已输入文本(值优先; 不派发 Escape, 避免误清其他字段输入, 菜单由后续点击自然关闭)
       try {
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
         setter.call(input, String(value));
