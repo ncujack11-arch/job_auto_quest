@@ -285,12 +285,22 @@
         if (!items.length && document.querySelector('[class*="dropdown"], [class*="select-dropdown"]')) break;
       }
       if (best) {
-        best.scrollIntoView({ block: 'center' });
+        // 点击最深文本叶节点(MOKA 学校/专业列表须点最内层文本节点才生效, 外层 common-item 点击无效)
+        let clickTarget = best;
+        try {
+          const leaf = Array.from(best.querySelectorAll('*')).find((l) => l.children.length === 0 && (l.textContent || '').trim() === String(value));
+          if (leaf) clickTarget = leaf;
+        } catch (e) { /* ignore */ }
+        clickTarget.scrollIntoView({ block: 'center' });
         await sleep(80);
-        best.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-        best.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-        best.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        await sleep(200);
+        const rcf = clickTarget.getBoundingClientRect();
+        const cx = rcf.x + rcf.width / 2, cy = rcf.y + rcf.height / 2;
+        clickTarget.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', clientX: cx, clientY: cy }));
+        clickTarget.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
+        clickTarget.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', clientX: cx, clientY: cy }));
+        clickTarget.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
+        clickTarget.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
+        await sleep(250);
         return true;
       }
       // 无匹配项: 尝试点击打开列表并点选目标(部分系统不靠搜索过滤, 直接列表选择)
@@ -391,6 +401,12 @@
           if (tv === String(want)) { hit = it; break; }
         }
         if (!hit) { dismissOverlays(); continue; }
+        // 点击最深文本叶节点(MOKA 列表项须点最内层文本节点才生效)
+        let clickTarget = hit;
+        try {
+          const leaf = Array.from(hit.querySelectorAll('*')).find((l) => l.children.length === 0 && (l.textContent || '').trim() === String(want));
+          if (leaf) clickTarget = leaf;
+        } catch (e) { /* ignore */ }
         // 完整 pointer + mouse 事件序列(MOKA sd- 组件监听 pointerdown, 仅 mouse 事件不生效)
         try {
           const rc = hit.getBoundingClientRect();
