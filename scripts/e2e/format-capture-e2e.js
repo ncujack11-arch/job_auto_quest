@@ -63,6 +63,11 @@ async function realPageTest(browser) {
   await page.goto(REAL_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(8000);
   await inject(page);
+  // 等待表单字段就绪(页面异步渲染, 避免扫描时序抖动)
+  await page.waitForFunction(() => {
+    try { return document.querySelectorAll('input,select,textarea').length >= 30; } catch (e) { return false; }
+  }, { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(1500);
 
   const res = await page.evaluate(async () => {
     const out = {};

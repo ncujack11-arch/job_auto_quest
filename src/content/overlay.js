@@ -365,6 +365,30 @@
 
   // ---------- 学习模式: 交互式捕获预览面板 v2 ----------
   // 统计/模块标签/三态样式(一致灰·差异黄·新增蓝)/批量操作/归属/拉黑/二次确认/进度
+  // 格式捕获结果面板: 展示捕获的空字段格式清单(标签/类型), 提示去信息库填写
+  function showFormatResult(items) {
+    if (!items || !items.length) {
+      toast('没有可捕获的空字段格式(字段已识别或均有值)');
+      return;
+    }
+    const box = h('div', { class: 'af-learn-box', style: 'position:fixed;right:16px;top:64px;z-index:2147483646;width:min(320px,92vw);background:#fff;border:1px solid #dbeafe;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:12px;font-size:13px;color:#334155' });
+    box.appendChild(h('div', { style: 'font-weight:600;color:#1d4ed8;margin-bottom:8px', text: '🧩 已捕获 ' + items.length + ' 个表单格式到信息库' }));
+    items.slice(0, 12).forEach((it) => {
+      const row = h('div', { style: 'display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid #f1f5f9;font-size:12.5px' });
+      row.appendChild(h('span', { text: '· ' + (it.label || '').slice(0, 18) }));
+      row.appendChild(h('span', { style: 'color:#94a3b8;flex-shrink:0', text: (it.ctype || 'text') + (it.options && it.options.length ? '(' + it.options.length + '选项)' : '') }));
+      box.appendChild(row);
+    });
+    if (items.length > 12) box.appendChild(h('div', { style: 'color:#94a3b8;font-size:12px;padding-top:4px', text: '… 共 ' + items.length + ' 个' }));
+    box.appendChild(h('div', { style: 'margin-top:8px;font-size:12px;color:#64748b', text: '打开配置页 → 信息库 → 自定义字段, 有空填写即可自动匹配填充' }));
+    box.appendChild(h('div', { style: 'margin-top:8px;text-align:right' }, [
+      h('button', { style: 'border:1px solid #d1d5db;background:#fff;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer', text: '知道了', onclick: () => box.remove() }),
+    ]));
+    document.body.appendChild(box);
+    setTimeout(() => { try { box.remove(); } catch (e) { /* ignore */ } }, 15000);
+  }
+
+  // 格式捕获结果面板: 展示捕获的空字段格式清单(标签/类型), 提示去信息库填写
   function showLearnPanel(items, onDone) {
     if (!items || !items.length) {
       toast('未发现可捕获的内容(页面无已填写字段或均与信息库一致)');
@@ -819,7 +843,7 @@
   }
 
   AS.overlay = {
-    showSummary, showRecordPanel, showUnlockPrompt, showLearnPanel, showPreview,
+    showSummary, showRecordPanel, showUnlockPrompt, showLearnPanel, showPreview, showFormatResult,
     showExperiencePicker, showFieldPicker, showProgress, closeProgress, showDiagnostic,
     highlight, clearHighlights, toast, closePanel, ensureFloatBall,
   };

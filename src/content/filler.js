@@ -248,6 +248,69 @@
   }
 
   // 自定义下拉组件(ElementUI / AntD / 原生角色 / MOKA 搜索式学校专业)
+  // 渐进式搜索+点击确认(学校/专业/城市等搜索式下拉): 逐级截短关键词输入, 匹配列表项并点击叶节点
+  // 返回 { ok, matchedText }
+  async function searchAndClick(input, value) {
+    const fullValue = String(value || '');
+    if (!fullValue) return { ok: false };
+    const candidates = [];
+    candidates.push(fullValue);
+    const cjkLen = fullValue.replace(/[a-zA-Z0-9\s]/g, '').length;
+    if (cjkLen >= 6) candidates.push(fullValue.slice(0, -2));
+    if (cjkLen >= 8) candidates.push(fullValue.slice(0, -4));
+    if (cjkLen >= 5) candidates.push(fullValue.slice(0, 3));
+    if (cjkLen >= 4) candidates.push(fullValue.slice(0, 2));
+    const optionSelector = '[class*="Menu-content-item"],[class*="common-item"],[role="option"],[role="listbox"] li,[role="listbox"] [class*="option"],.el-select-dropdown__item,.ant-select-item-option,[class*="dropdown"] li,[class*="select"] [class*="item"],[class*="dropdown-menu"] [class*="item"],[class*="option-item"],[class*="list-item"]';
+    const findMatch = (cand) => {
+      let b = null, bs = 0;
+      document.querySelectorAll(optionSelector).forEach((it) => {
+        const t = (it.textContent || '').trim();
+        if (!t || t.length > 40) return;
+        const hit = FUZZY().closest(cand, [t], { minScore: 0.55, aliases: VALUE_ALIASES[cand] ? { [cand]: VALUE_ALIASES[cand] } : undefined });
+        if (hit && hit.score > bs) { bs = hit.score; b = it; }
+      });
+      return b;
+    };
+    let best = null;
+    for (const cand of candidates) {
+      try {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(input, cand);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      } catch (e) { /* ignore */ }
+      for (let i = 0; i < 6 && !best; i++) {
+        await sleep(250);
+        best = findMatch(cand);
+        let panelText = '';
+        const panelNow = Array.from(document.querySelectorAll('[class*="Dropdown-dropdown"],[class*="Select-menu"]')).find((p) => { const r = p.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+        if (panelNow) panelText = (panelNow.textContent || '').replace(/\s+/g, '');
+        if (best || /没有找到|暂无选项|无数据/.test(panelText)) break;
+      }
+      if (best) break;
+      await sleep(200);
+    }
+    if (!best) return { ok: false };
+    // 点击最深文本叶节点(MOKA 学校/专业列表须点最内层文本节点才生效)
+    let clickTarget = best;
+    try {
+      const bText = (best.textContent || '').trim();
+      const leaf = Array.from(best.querySelectorAll('*')).find((l) => l.children.length === 0 && (l.textContent || '').trim() === bText);
+      if (leaf) clickTarget = leaf;
+    } catch (e) { /* ignore */ }
+    clickTarget.scrollIntoView({ block: 'center' });
+    await sleep(80);
+    const rcf = clickTarget.getBoundingClientRect();
+    const cx = rcf.x + rcf.width / 2, cy = rcf.y + rcf.height / 2;
+    clickTarget.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', clientX: cx, clientY: cy }));
+    clickTarget.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
+    clickTarget.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', clientX: cx, clientY: cy }));
+    clickTarget.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
+    clickTarget.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
+    await sleep(250);
+    return { ok: true, matchedText: (best.textContent || '').trim() };
+  }
+
+  // 搜索式下拉(学校/专业/城市): 输入后异步出结果, 轮询等待匹配项
   async function fillCustom(el, custom, value) {
     const root = custom || el;
     // 尝试输入
@@ -270,46 +333,17 @@
           return true;
         }
       }
-      // 搜索式下拉(学校/专业/城市): 输入后异步出结果, 轮询等待匹配项
-      let best = null, bestScore = 0;
-      for (let i = 0; i < 8 && !best; i++) {
-        await sleep(250);
-        // 选择器覆盖 MOKA sd-Menu / sd-Select / ElementUI / AntD / role=option
-        const items = document.querySelectorAll('[class*="Menu-content-item"],[class*="common-item"],[role="option"],[role="listbox"] li,[role="listbox"] [class*="option"],.el-select-dropdown__item,.ant-select-item-option,[class*="dropdown"] li,[class*="select"] [class*="item"],[class*="dropdown-menu"] [class*="item"],[class*="option-item"],[class*="list-item"]');
-        items.forEach((it) => {
-          const t = it.textContent || '';
-          const hit = FUZZY().closest(String(value), [t], { minScore: 0.6, aliases: VALUE_ALIASES[String(value)] ? { [value]: VALUE_ALIASES[String(value)] } : undefined });
-          if (hit && hit.score > bestScore) { bestScore = hit.score; best = it; }
-        });
-        // 菜单已消失(组件自关闭)则停止轮询
-        if (!items.length && document.querySelector('[class*="dropdown"], [class*="select-dropdown"]')) break;
-      }
-      if (best) {
-        // 点击最深文本叶节点(MOKA 学校/专业列表须点最内层文本节点才生效, 外层 common-item 点击无效)
-        let clickTarget = best;
-        try {
-          const leaf = Array.from(best.querySelectorAll('*')).find((l) => l.children.length === 0 && (l.textContent || '').trim() === String(value));
-          if (leaf) clickTarget = leaf;
-        } catch (e) { /* ignore */ }
-        clickTarget.scrollIntoView({ block: 'center' });
-        await sleep(80);
-        const rcf = clickTarget.getBoundingClientRect();
-        const cx = rcf.x + rcf.width / 2, cy = rcf.y + rcf.height / 2;
-        clickTarget.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', clientX: cx, clientY: cy }));
-        clickTarget.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
-        clickTarget.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerId: 1, pointerType: 'mouse', clientX: cx, clientY: cy }));
-        clickTarget.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
-        clickTarget.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: cx, clientY: cy }));
-        await sleep(250);
-        return true;
-      }
+      // 搜索式下拉(学校/专业/城市): 渐进式输入 + 点击列表项确认(像日期点选一样, 不依赖搜索精确匹配)
+      const fullValue = String(value);
+      const sr = await searchAndClick(input, fullValue);
+      if (sr.ok) return true;
       // 无匹配项: 尝试点击打开列表并点选目标(部分系统不靠搜索过滤, 直接列表选择)
-      const okList = await clickListOption(input, String(value));
+      const okList = await clickListOption(input, fullValue);
       if (okList) return true;
       // 恢复已输入文本(值优先; 不派发 Escape, 避免误清其他字段输入, 菜单由后续点击自然关闭)
       try {
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-        setter.call(input, String(value));
+        setter.call(input, fullValue);
         input.dispatchEvent(new Event('input', { bubbles: true }));
       } catch (e) { /* ignore */ }
       return true;
@@ -675,6 +709,20 @@
                 await insertTextFallback(el, target);
               }
             }
+          }
+          // 搜索式下拉检测(学校/专业/城市等): 输入后面板弹出(有选项或"没有找到") → 自动匹配列表项点击确认(像日期点选一样)
+          if (target && target.length >= 2) {
+            try {
+              const panelNow = Array.from(document.querySelectorAll('[class*="Dropdown-dropdown"],[class*="Select-menu"]')).find((p) => { const r = p.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
+              if (panelNow) {
+                const pText = (panelNow.textContent || '').replace(/\s+/g, '');
+                const hasOptions = panelNow.querySelectorAll('[class*="Menu-content-item"],[class*="common-item"],[role="option"],[class*="dropdown"] li,[class*="option-item"]').length > 0;
+                if (hasOptions || /没有找到|暂无选项|无数据/.test(pText)) {
+                  const sr = await searchAndClick(el, target);
+                  if (sr.ok) return { ok: true, action: 'filled', detail: '搜索下拉点击确认(' + (sr.matchedText || '').slice(0, 12) + ')' };
+                }
+              }
+            } catch (e) { /* ignore */ }
           }
           return tr.truncated
             ? { ok: true, action: 'filled', detail: `已按长度限制截断为 ${tr.max} 字` }
