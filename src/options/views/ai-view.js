@@ -33,28 +33,60 @@
     const epItem = UI().el('div', { class: 'form-item' });
     epItem.appendChild(UI().el('label', { text: '服务地址(OpenAI 兼容)' }));
     const epInput = UI().el('input', {
-      type: 'text', value: ai.endpoint || 'http://127.0.0.1:11434', placeholder: 'http://127.0.0.1:11434',
+      type: 'text', value: ai.endpoint || 'https://api.deepseek.com', placeholder: 'https://api.deepseek.com',
       onchange: async (e) => {
         settings.ai = settings.ai || {};
-        settings.ai.endpoint = e.target.value.trim() || 'http://127.0.0.1:11434';
+        settings.ai.endpoint = e.target.value.trim() || 'https://api.deepseek.com';
         await AS.storage.saveSettings(settings);
       },
     });
     epItem.appendChild(epInput);
+    epItem.appendChild(UI().el('div', { class: 'view-sub', style: 'margin:4px 0 0 0', text: '预设: DeepSeek https://api.deepseek.com · OpenAI https://api.openai.com · 本地 Ollama http://127.0.0.1:11434' }));
     form.appendChild(epItem);
+
+    const keyItem = UI().el('div', { class: 'form-item' });
+    keyItem.appendChild(UI().el('label', { text: 'API Key(仅存本地浏览器)' }));
+    const keyInput = UI().el('input', {
+      type: 'password', value: ai.apiKey || '', placeholder: 'sk-...(在线 API 必填, 本地 Ollama 可留空)',
+      onchange: async (e) => {
+        settings.ai = settings.ai || {};
+        settings.ai.apiKey = e.target.value.trim();
+        await AS.storage.saveSettings(settings);
+      },
+    });
+    keyItem.appendChild(keyInput);
+    form.appendChild(keyItem);
 
     const mdItem = UI().el('div', { class: 'form-item' });
     mdItem.appendChild(UI().el('label', { text: '模型名' }));
     const mdInput = UI().el('input', {
-      type: 'text', value: ai.model || 'qwen2.5:7b', placeholder: '如 qwen2.5:7b / llama3',
+      type: 'text', value: ai.model || 'deepseek-chat', placeholder: '如 deepseek-chat / gpt-4o-mini / qwen2.5:7b',
       onchange: async (e) => {
         settings.ai = settings.ai || {};
-        settings.ai.model = e.target.value.trim() || 'default';
+        settings.ai.model = e.target.value.trim() || 'deepseek-chat';
         await AS.storage.saveSettings(settings);
       },
     });
     mdItem.appendChild(mdInput);
     form.appendChild(mdItem);
+
+    // 开放题自动作答开关
+    const oqItem = UI().el('div', { class: 'form-item' });
+    oqItem.appendChild(UI().el('label', { text: '填充时开放题自动作答' }));
+    const oqWrap = UI().el('div', { style: 'display:flex;gap:8px;align-items:center' });
+    const oqCheck = UI().el('input', {
+      type: 'checkbox', checked: ai.openQuestionAuto !== false,
+      onchange: async (e) => {
+        settings.ai = settings.ai || {};
+        settings.ai.openQuestionAuto = e.target.checked;
+        await AS.storage.saveSettings(settings);
+      },
+    });
+    oqWrap.appendChild(oqCheck);
+    oqWrap.appendChild(UI().el('span', { style: 'font-size:12px;color:#6b7280', text: '填充时若开放题信息库无答案, 自动调用大模型结合你的信息与公司/岗位生成回答并填入' }));
+    oqItem.appendChild(oqWrap);
+    form.appendChild(oqItem);
+
     cfgCard.appendChild(form);
     const testBtn = UI().el('button', {
       class: 'btn', text: '🔌 测试连接', onclick: async (e) => {
@@ -75,8 +107,8 @@
 
     if (!ai.enabled) {
       container.appendChild(UI().el('div', { class: 'empty' }, [
-        UI().el('b', { text: '本地大模型未启用' }),
-        UI().el('span', { text: '开启上方开关并配置本地服务地址后, 可使用经历改写与面试模拟。' }),
+        UI().el('b', { text: '大模型未启用' }),
+        UI().el('span', { text: '开启上方开关并配置服务地址/API Key 后, 填充时开放题自动作答、经历改写与面试模拟可用。' }),
       ]));
       return;
     }

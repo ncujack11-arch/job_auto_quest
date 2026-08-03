@@ -434,6 +434,67 @@
       rounds++;
     }
 
+    // AI 补充填写(设置开启时): 一键填充覆盖不到的字段 → 大模型结合信息库+公司岗位生成
+    // 安全规则: 除 姓名/手机号/验证码/证件照 外均可 AI 尝试(模型无真实依据时输出 __SKIP__ 跳过, 不会乱填)
+    const isAIFillable = (ctx) => {
+      try {
+        if (AS.matcher.isOpenQuestionField(ctx)) return true;
+        const text = (ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.prevText + ' ' + ctx.rowText);
+        // 绝不 AI 生成: 姓名 / 手机号 / 验证码 / 证件照
+        if (/(姓名|真实姓名|名字|手机|手机号|电话号码|电话|联系电话|验证码|图形码|证件照|照片)/i.test(text)) return false;
+        return true;
+      } catch (e) { return false; }
+    };
+    if (settings.ai && settings.ai.enabled && settings.ai.openQuestionAuto !== false) {
+      try {
+        const ctxInfo = grabPageInfo();
+        const companyPos = [ctxInfo.company, ctxInfo.position].filter(Boolean).join(' · ') || '未知';
+        for (const uf of plan.unmatchedFields) {
+          try {
+            // 元素重定位: executePlan 填充其他字段后 React 可能重渲染替换元素(旧引用写不进)
+            let targetEl = uf.el;
+            if (!targetEl.isConnected) {
+              try {
+                const ph = String(uf.el.placeholder || '');
+                const tag = uf.el.tagName.toLowerCase();
+                const fresh = ph ? document.querySelector(tag + '[placeholder="' + ph.replace(/"/g, '\\"') + '"]') : null;
+                if (fresh) targetEl = fresh;
+              } catch (e) { /* ignore */ }
+            }
+            const uctx = AS.matcher.buildContext(targetEl);
+            if (!uctx.visible || targetEl.readOnly || targetEl.disabled) continue;
+            const isOpen = AS.matcher.isOpenQuestionField(uctx);
+            if (!isOpen && !isAIFillable(uctx)) continue;
+            const label = (uctx.labelText || uctx.placeholder || uf.label || '开放题').slice(0, 60);
+            setFillState('ai', `AI 生成: ${label.slice(0, 18)}...`);
+            reportProgress('ai', { question: label });
+            let options = [];
+            if (targetEl.tagName === 'SELECT') {
+              options = Array.from(targetEl.options).map((o) => o.textContent).filter((t) => t && t.trim() && t !== '请选择');
+            }
+            const answer = isOpen
+              ? await AS.ai.generateOpenAnswer(label, profile, companyPos)
+              : await AS.ai.generateFieldValue(label, options, profile, companyPos);
+            if (!answer) continue;
+            let rAI = await AS.filler.fillField({ el: targetEl, type: targetEl.tagName === 'TEXTAREA' ? 'textarea' : 'text' }, answer, opts);
+            if (!(rAI.ok && rAI.action === 'filled')) {
+              // 偶发失败(页面重渲染等): 等待后重试一次
+              await new Promise((r) => setTimeout(r, 300));
+              rAI = await AS.filler.fillField({ el: targetEl, type: targetEl.tagName === 'TEXTAREA' ? 'textarea' : 'text' }, answer, opts);
+            }
+            if (rAI.ok && rAI.action === 'filled') {
+              report.filled++;
+              report.infos.push({ label, detail: isOpen ? 'AI 自动作答' : 'AI 补充填写' });
+              AS.overlay.highlight(targetEl, 'af-highlight-ok');
+              safeToast(`🤖 AI 已${isOpen ? '作答' : '补充'}: ${label.slice(0, 16)}...`, 3000);
+            }
+          } catch (e) {
+            LOG().warn('content', 'ai fill failed', e && e.message || e);
+          }
+        }
+      } catch (e) { /* ignore */ }
+    }
+
     await finish(snapshots, unmatchedEls, !isAuto);
     // 自动勾选用户协议/隐私政策复选框(设置开启时, 严格匹配协议类关键词)
     if (settings.autoAgreeProtocol !== false) {

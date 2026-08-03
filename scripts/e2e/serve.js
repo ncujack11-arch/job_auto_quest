@@ -48,6 +48,7 @@ const FIELDS = {
   'uncommon.referee': { labels: ['推荐人'], types: ['text'], pool: [] },
   'uncommon.source': { labels: ['招聘信息来源'], types: ['text'], pool: [] },
   'uncommon.currentSalary': { labels: ['当前薪资'], types: ['text'], pool: [] },
+  'uncommon.plan': { labels: ['职业规划'], types: ['textarea'], pool: [] },
 };
 
 // 每次固定取这些字段: 必含 6 个(fixed) + 随机池选 7-9 个
@@ -143,6 +144,33 @@ h1{border-bottom:2px solid #2563eb;padding-bottom:6px;font-size:18px}
 
 const server = http.createServer((req, res) => {
   const url = req.url.split('?')[0];
+  // Mock OpenAI 兼容端点(模拟 DeepSeek, 供 AI 自动作答 E2E)
+  if (url === '/v1/chat/completions') {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      let question = '';
+      try {
+        const j = JSON.parse(body);
+        const msgs = (j.messages || []);
+        const lastUser = msgs.filter((m) => m.role === 'user').pop();
+        question = lastUser ? lastUser.content : '';
+      } catch (e) { /* ignore */ }
+      const qMark = question.match(/开放题:\s*([^\n]+)/);
+      const fMark = question.match(/字段:\s*([^\n]+)/);
+      let content = '';
+      if (qMark) {
+        content = '这是AI根据我的信息生成的回答(针对: ' + qMark[1].trim() + '): 我热爱技术, 学习能力强, 具备扎实的专业基础与团队协作能力, 期待加入贵司共同成长。';
+      } else if (fMark) {
+        content = '基于我的信息生成的补充(字段: ' + fMark[1].trim() + '): 职业规划聚焦技术深耕与持续成长, 希望在团队中承担核心研发工作。';
+      } else {
+        content = 'ok';
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+    });
+    return;
+  }
   if (url === '/form.html' || url === '/') {
     const g = genForm();
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'X-Filled-Count': String(g.meta.filledCount), 'X-Total-Count': String(g.meta.total) });

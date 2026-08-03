@@ -313,7 +313,7 @@ load('options/options.js');
   await delay(30);
   view = global._idMap['view'];
   t('AI 视图渲染(配置卡片)', (view.textContent || '').includes('本地大模型配置'));
-  t('AI 未启用时显示引导', (view.textContent || '').includes('本地大模型未启用'));
+  t('AI 未启用时显示引导', (view.textContent || '').includes('大模型未启用'));
   // 启用后显示功能卡片
   await AS.storage.saveSettings({ ai: { enabled: true, endpoint: 'http://127.0.0.1:11434', model: 'test' } });
   await AS.optionsUI.route();

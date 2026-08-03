@@ -40,7 +40,7 @@
     photoDataUrl: '',            // 证件照 dataURL(可选, 用于自动上传)
     refCodes: [],                // 内推码库 [{host, code}]
     autoLock: true,              // 闲置 5 分钟自动锁定(清除会话密钥)
-    ai: { enabled: false, endpoint: 'http://127.0.0.1:11434', model: 'qwen2.5:7b' },  // 本地大模型(预留接口)
+    ai: { enabled: false, endpoint: 'https://api.deepseek.com', apiKey: '', model: 'deepseek-chat', openQuestionAuto: true, openQuestionTimeout: 60 },  // 大模型(DeepSeek/OpenAI 兼容)开放题自动作答
     logLevel: 'info',
     encryption: { enabled: false, salt: '', iterations: 100000, passwordHash: '', hint: '' },
   };
@@ -57,6 +57,7 @@
     'src/utils/matcher.js',
     'src/modules/fill-engine.js',
     'src/modules/learn-save.js',
+    'src/utils/ai.js',
     'src/content/scanner.js',
     'src/content/capture.js',
     'src/content/filler.js',

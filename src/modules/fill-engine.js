@@ -86,6 +86,17 @@
       if (!fieldKey && AS.matcher.isOpenQuestionField(ctx)) {
         const answer = AS.matcher.resolveOpenQuestion(profile, ctx.labelText + ' ' + ctx.placeholder + ' ' + ctx.name);
         if (answer !== null) { fieldKey = 'openQuestions'; value = answer; }
+        else {
+          // 开放题但信息库无答案: 不再走普通匹配(避免误配到其他字段, 如"职业规划"被填成学历),
+          // 交由 AI 补充填写或人工处理
+          unmatchedFields.push({
+            signature: ctx.name || ctx.id || ctx.labelText || ctx.placeholder || '开放题',
+            label: ctx.labelText || ctx.placeholder || '开放题',
+            reason: '开放题无答案(可 AI 自动作答)',
+            el: field.el,
+          });
+          continue;
+        }
       }
       // 4) 站点映射 / 关键词匹配
       if (!fieldKey) {
