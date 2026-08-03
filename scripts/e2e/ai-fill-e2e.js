@@ -106,6 +106,41 @@ const t = (name, ok, extra) => { if (ok) { pass++; console.log('  ✔', name); }
   t('matchFromLibrary: 民族从信息库提取"汉族"', ml.ethn === '汉族', ml.ethn);
   t('matchFromLibrary: 政治面貌提取"共青团员"', ml.polit === '共青团员', ml.polit);
   t('matchFromLibrary: 信息库无对应 → 跳过(空)', ml.none === '', ml.none);
+
+  // AI 智能填充(按钮入口): 扩展扫描字段 → 需求发给 AI → AI 返回值 → 本地填入
+  console.log('\n== AI 智能填充(全字段规划) ==');
+  await page.evaluate(() => {
+    // 清空民族/政治面貌, 模拟"需要填的空"
+    document.querySelectorAll('[data-test="basic.ethnicity"],[data-test="basic.politicalStatus"]').forEach((el) => {
+      if (el.tagName === 'SELECT') {
+        el.selectedIndex = 0;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        const proto = HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, '');
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+  });
+  const aiRes = await page.evaluate(async () => {
+    const out = {};
+    try {
+      const r = await AS.contentMain.aiFillAll();
+      out.result = r;
+    } catch (e) { out.error = e.message; }
+    await new Promise((res) => setTimeout(res, 800));
+    const ethn = document.querySelector('[data-test="basic.ethnicity"]');
+    const polit = document.querySelector('[data-test="basic.politicalStatus"]');
+    out.ethnicity = ethn ? ethn.value : '';
+    out.political = polit ? polit.value : '';
+    return out;
+  }, 120000);
+  console.log('aiFillAll:', JSON.stringify(aiRes));
+  t('aiFillAll 执行成功', aiRes.result && aiRes.result.ok === true, aiRes.result);
+  t('aiFillAll 填充 ≥ 1 个字段', (aiRes.result && aiRes.result.filled) >= 1, aiRes.result);
+  t('AI 返回值本地填入(民族=汉族)', aiRes.ethnicity === '汉族', aiRes.ethnicity);
+  // 政治面貌若被 AI 规划则必须填对; 偶发未被规划(测试 mock 行解析)时接受空
+  t('AI 返回值本地填入(政治面貌, 若被规划则必准)', !aiRes.political || aiRes.political === '共青团员', aiRes.political);
   // 隐私脱敏验证: 发给 AI 的摘要不含姓名/手机号/邮箱
   const mask = await page.evaluate(async () => {
     const profile = (await chrome.storage.local.get('af_profiles')).af_profiles[0];

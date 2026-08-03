@@ -29,6 +29,8 @@ body { width: 320px; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", 
 .scan-info b { font-size: 14px; }
 
 .primary-btn { padding: 12px; border: 0; border-radius: 10px; background: var(--primary); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; transition: background .15s; }
+.ai-btn { background: linear-gradient(135deg, #7c3aed, #4f46e5); margin-top: 8px; }
+.ai-btn:hover { background: linear-gradient(135deg, #6d28d9, #4338ca); }
 .primary-btn:hover { background: var(--primary-dark); }
 .primary-btn:disabled { background: #93c5fd; cursor: not-allowed; }
 

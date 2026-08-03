@@ -53,7 +53,7 @@ const FIELDS = {
 };
 
 // 每次固定取这些字段: 必含 6 个(fixed) + 随机池选 7-9 个
-const FIXED = ['basic.name', 'basic.phone', 'basic.email', 'basic.gender', 'education.school', 'openQuestions.intro', 'intent.expectedSalary', 'agreement.protocol', 'uncommon.referee', 'uncommon.currentSalary'];
+const FIXED = ['basic.name', 'basic.phone', 'basic.email', 'basic.gender', 'education.school', 'openQuestions.intro', 'intent.expectedSalary', 'agreement.protocol', 'uncommon.referee', 'uncommon.currentSalary', 'basic.ethnicity', 'basic.politicalStatus'];
 const RANDOM_POOL = Object.keys(FIELDS).filter((k) => !FIXED.includes(k));
 
 function esc(s) { return String(s).replace(/"/g, '&quot;'); }
@@ -161,22 +161,27 @@ const server = http.createServer((req, res) => {
       } catch (e) { /* ignore */ }
       const qMark = question.match(/开放题:\s*([^\n]+)/);
       const fMark = question.match(/字段:\s*([^\n]+)/);
-      const planMark = question.match(/表单字段: (\[[\s\S]*\])/);
+      const planMark = question.match(/表单字段\(每行一个\):\s*([\s\S]*?)\n\n输出格式/);
       let content = '';
       if (planMark) {
-        // AI 托管批量规划: 返回每字段填充值(测试固定规则)
+        // AI 托管批量规划(行格式): 返回 "序号|值" 每行
         try {
-          const fields = JSON.parse(planMark[1]);
+          const lines = planMark[1].split('\n').map((l) => l.trim()).filter(Boolean);
           const rules = [['民族', '汉族'], ['籍贯', '江西 上饶市 余干县'], ['政治面貌', '共青团员'], ['所在地', '杭州'], ['现居地', '杭州'], ['期望城市', '杭州'], ['期望工作地点', '杭州']];
-          const list = fields.map((f) => {
-            let value = '';
+          const out = [];
+          lines.forEach((line) => {
+            const m = line.match(/^(\d+)\.\s*(.+?)(?:\s*\(选项:.*\))?$/);
+            if (!m) return;
+            const idx = parseInt(m[1], 10);
+            const label = m[2];
+            let value = '空';
             for (const [kw, v] of rules) {
-              if ((f.label || '').includes(kw)) { value = v; break; }
+              if (label.includes(kw)) { value = v; break; }
             }
-            return { label: f.label, value };
+            out.push(idx + '|' + value);
           });
-          content = JSON.stringify(list);
-        } catch (e) { content = '[]'; }
+          content = out.join('\n');
+        } catch (e) { content = ''; }
       } else if (qMark) {
         content = '这是AI根据我的信息生成的回答(针对: ' + qMark[1].trim() + '): 我热爱技术, 学习能力强, 具备扎实的专业基础与团队协作能力, 期待加入贵司共同成长。';
       } else if (fMark) {

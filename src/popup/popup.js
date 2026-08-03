@@ -234,6 +234,19 @@
 
   function bindEvents() {
     $('fillBtn').addEventListener('click', fill);
+    $('aiFillBtn').addEventListener('click', async () => {
+      if (!currentTab) return;
+      progressLines = ['🤖 AI 智能填充请求已发送...'];
+      progressDone = false;
+      renderProgress();
+      try {
+        const ok = await ensureContentScript();
+        if (!ok) { showStatus('error', '无法注入脚本, 请刷新页面'); return; }
+        await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_AI_FILL' }).catch(() => {});
+      } catch (e) {
+        showStatus('error', 'AI 填充失败: ' + (e.message || e));
+      }
+    });
     $('allSections').addEventListener('change', (e) => {
       document.querySelectorAll('#sectionsGrid input').forEach((c) => { c.checked = e.target.checked; });
     });
@@ -316,9 +329,15 @@
       progressLines.push(`🔍 扫描到 ${msg.total} 个表单字段`);
     } else if (msg.stage === 'match') {
       progressLines.push(`🎯 匹配到 ${msg.matched} 个字段` + (msg.unmatched ? `, ${msg.unmatched} 个未匹配` : ''));
+    } else if (msg.stage === 'ai') {
+      progressLines = ['🤖 AI 规划 ' + (msg.total || '') + ' 个字段...'];
+      progressDone = false;
+    } else if (msg.stage === 'ai-fill') {
+      progressLines[0] = `🤖 AI 填充中 ${msg.i}/${msg.total}: ${msg.label || ''}`;
     } else if (msg.stage === 'done') {
       progressDone = true;
-      progressLines.push(`✅ 完成: 成功 ${msg.filled} · 跳过 ${msg.skipped} · 未匹配 ${msg.unmatched}${msg.notEffective ? ` · ⚠未生效 ${msg.notEffective}` : ''}`);
+      if (msg.ai) progressLines = [`✅ AI 填充完成: 成功 ${msg.filled} · 未匹配 ${msg.unmatched}`];
+      else progressLines.push(`✅ 完成: 成功 ${msg.filled} · 跳过 ${msg.skipped} · 未匹配 ${msg.unmatched}${msg.notEffective ? ` · ⚠未生效 ${msg.notEffective}` : ''}`);
     } else if (msg.stage === 'error') {
       progressDone = true;
       progressLines.push('❌ 异常: ' + (msg.message || '未知错误'));

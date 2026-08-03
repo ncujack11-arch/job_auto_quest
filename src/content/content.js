@@ -501,7 +501,7 @@
               options = Array.from(uf.el.options).map((o) => o.textContent).filter((t) => t && t.trim() && t !== '请选择');
             }
             aiFields.push({
-              label: (uctx.labelText || uctx.placeholder || uf.label || '').slice(0, 40),
+              label: (uctx.labelText || uctx.placeholder || uctx.prevText || (uctx.rowText ? String(uctx.rowText).split(/[\s*:：|｜]/)[0].slice(0, 12) : '') || uf.label || '').slice(0, 40),
               options,
               el: uf.el,
             });
@@ -755,6 +755,97 @@
     } catch (e) {
       LOG().warn('content', 'collect empty format failed', e);
       AS.overlay.toast('捕获失败: ' + (e && e.message || e), 4000);
+    }
+  }
+
+  // ---------- AI 智能填充(按钮触发): 全字段交给 DeepSeek 规划填充, 带进度状态 ----------
+  async function aiFillAll() {
+    try {
+      const settings = await AS.storage.getSettings();
+      if (!(settings.ai && settings.ai.enabled)) {
+        safeToast('🤖 AI 未启用: 请到配置页 → AI 工具 → 填入 DeepSeek API Key 并开启开关', 6000);
+        setFillState('error', 'AI 未启用(需配置 API Key)');
+        reportProgress('error', { message: 'AI 未启用(需配置 API Key)' });
+        return { ok: false, reason: 'ai-disabled' };
+      }
+      const profile = await AS.storage.getActiveProfile();
+      if (!profile) { safeToast('信息库为空, 请先在配置页创建方案', 4000); return { ok: false, reason: 'no-profile' }; }
+      const fields = AS.scanner.scan();
+      const infos = [];
+      for (const f of fields) {
+        try {
+          const ctx = AS.matcher.buildContext(f.el);
+          if (!ctx.visible || f.el.readOnly || f.el.disabled) continue;
+          if (/验证码|图形码|captcha/.test(ctx.placeholder || '')) continue;
+          let options = [];
+          if (f.type === 'select' && Array.isArray(f.options)) options = f.options.map((o) => o.text).filter((t) => t && t !== '请选择');
+          infos.push({ label: (ctx.labelText || ctx.placeholder || ctx.prevText || (ctx.rowText ? String(ctx.rowText).split(/[\s*:：|｜]/)[0].slice(0, 12) : '') || f.name || '').slice(0, 40), options, el: f.el });
+        } catch (e) { /* ignore */ }
+      }
+      if (!infos.length) { safeToast('页面未扫描到可填充字段', 3000); return { ok: false, reason: 'no-fields' }; }
+      const ctxInfo = grabPageInfo();
+      const companyPos = [ctxInfo.company, ctxInfo.position].filter(Boolean).join(' · ') || '未知';
+      safeToast(`🤖 AI 智能填充开始: 规划 ${infos.length} 个字段...`, 4000);
+      setFillState('ai', `AI 规划 ${infos.length} 个字段...`);
+      reportProgress('ai', { total: infos.length });
+      const plan = await AS.ai.planFill(infos.map(({ label, options }) => ({ label, options })), profile, companyPos);
+      if (!plan || !plan.length) {
+        safeToast('🤖 AI 未返回填充值(请检查 API Key/网络, 配置页 → AI 工具 → 测试连接)', 6000);
+        setFillState('error', 'AI 未返回填充值');
+        reportProgress('error', { message: 'AI 未返回填充值' });
+        return { ok: false, reason: 'empty-plan' };
+      }
+      let filled = 0;
+      for (let i = 0; i < plan.length; i++) {
+        const item = plan[i];
+        const target = infos.find((f) => AS.fuzzy.containsAny(f.label, [item.label]) || AS.fuzzy.similarity(f.label, item.label) > 0.6);
+        if (!target) continue;
+        setFillState('ai', `AI 填充 ${i + 1}/${plan.length}: ${item.label.slice(0, 18)}...`);
+        reportProgress('ai-fill', { i: i + 1, total: plan.length, label: item.label });
+        let tEl = target.el;
+        if (!tEl.isConnected) {
+          try {
+            const ph = String(tEl.placeholder || '');
+            if (ph) tEl = document.querySelector(tEl.tagName.toLowerCase() + '[placeholder="' + ph.replace(/"/g, '\\"') + '"]') || tEl;
+          } catch (e) { /* ignore */ }
+        }
+        const typeOf = (el) => (el.tagName === 'TEXTAREA' ? 'textarea' : el.tagName === 'SELECT' ? 'select' : 'text');
+        let r = null;
+        // select: 直接按 option 文本精确匹配设置(最准确, 避免连续填充交互干扰)
+        if (tEl.tagName === 'SELECT') {
+          const idx2 = Array.from(tEl.options).findIndex((o) => (o.textContent || '').trim() === String(item.value).trim() || (o.value || '').trim() === String(item.value).trim());
+          if (idx2 >= 0) {
+            tEl.selectedIndex = idx2;
+            tEl.dispatchEvent(new Event('change', { bubbles: true }));
+            r = { ok: true, action: 'filled' };
+          }
+        }
+        if (!r) r = await AS.filler.fillField({ el: tEl, type: typeOf(tEl) }, item.value, { conflictMode: 'overwrite', typing: false, photoDataUrl: '' });
+        if (!(r.ok && r.action === 'filled')) {
+          await new Promise((res) => setTimeout(res, 300));
+          // select 兜底: 打开列表点击选择
+          if (tEl.tagName === 'SELECT') {
+            const okP = await AS.filler.fillPanelSelect(tEl, item.value);
+            if (okP) { filled++; AS.overlay.highlight(tEl, 'af-highlight-ok'); await new Promise((res) => setTimeout(res, 120)); continue; }
+          }
+          r = await AS.filler.fillField({ el: tEl, type: tEl.tagName === 'TEXTAREA' ? 'textarea' : tEl.tagName === 'SELECT' ? 'select' : 'text' }, item.value, { conflictMode: 'overwrite', typing: false, photoDataUrl: '' });
+        }
+        if (r.ok && r.action === 'filled') {
+          filled++;
+          AS.overlay.highlight(tEl, 'af-highlight-ok');
+        }
+        await new Promise((res) => setTimeout(res, 120));
+      }
+      safeToast(`🤖 AI 智能填充完成: ${filled}/${plan.length} 个字段`, 5000);
+      setFillState('done', `AI 填充完成: ${filled}/${plan.length}`);
+      reportProgress('done', { filled, skipped: 0, unmatched: plan.length - filled, errors: 0, notEffective: 0, ai: true });
+      return { ok: true, filled, total: plan.length };
+    } catch (e) {
+      LOG().warn('content', 'aiFillAll failed', e && e.message || e);
+      safeToast('🤖 AI 填充异常: ' + (e && e.message || e).slice(0, 80), 6000);
+      setFillState('error', 'AI 填充异常');
+      reportProgress('error', { message: e && e.message || String(e) });
+      return { ok: false, reason: 'exception' };
     }
   }
 
@@ -1020,6 +1111,11 @@
           AS.overlay.showSummary(msg.summary);
         }
         break;
+      case 'AF_AI_FILL':
+        if (isCurrent() && window.top === window) {
+          aiFillAll();
+        }
+        break;
       case 'AF_SHOW_LAST_RESULT':
         if (isCurrent() && window.top === window) {
           const last = window.__af_last_result;
@@ -1053,7 +1149,7 @@
     }
   });
 
-  AS.contentMain = { doFill, grabPageInfo, collectManualInputs, isJDPageLike, cacheCurrentJD, matchCachedJD, extractJobId };
+  AS.contentMain = { doFill, grabPageInfo, collectManualInputs, aiFillAll, isJDPageLike, cacheCurrentJD, matchCachedJD, extractJobId };
 
   // ---------- JD 详情页快捷按钮: 检测到 JD 后右下角显示「保存 JD 快照」----------
   let jdBtnEl = null;

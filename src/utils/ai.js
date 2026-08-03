@@ -182,36 +182,45 @@
     }
   }
 
-  // AI 托管填充规划: 完整信息库 + 页面全部字段 → AI 一次性给出每字段填充值
+  // AI 托管填充规划: 完整信息库 + 页面全部字段 → AI 一次性给出每字段填充值(行格式交互, 兼容性与稳定性优于 JSON)
   // 返回: [{ label, value }]  (value 为空表示不填)
   async function planFill(fieldsInfo, profile, context) {
     const full = JSON.stringify(profile ? profile.data : {});
-    const fieldsJson = JSON.stringify(fieldsInfo || []);
+    const fieldLines = (fieldsInfo || []).map((f, i) => (i + 1) + '. ' + (f.label || '?') + (f.options && f.options.length ? ' (选项: ' + f.options.join('/') + ')' : '')).join('\n');
     const prompt = [
       '你是网申表单填写助手(自动化代理)。请为下面的表单字段逐一给出填充值, 依据「我的完整信息」。',
       '规则: ',
       '1) 信息库有对应真实值(姓名/手机/邮箱/学校/专业/民族/籍贯/城市/时间/经历等) → 必须用信息库原值;',
       '2) 描述/主观类字段(自我介绍/职业规划/自我评价/补充说明等) → 基于信息库合理撰写;',
-      '3) 信息库无对应且无法合理推断 → value 留空字符串;',
+      '3) 信息库无对应且无法合理推断 → 该行输出 |空;',
       '4) 所有值必须真实/合理, 绝不编造虚假信息。',
       '',
       '我的完整信息: ' + full.slice(0, 5000),
       '公司/岗位: ' + (context || '未提供'),
       '',
-      '表单字段: ' + fieldsJson.slice(0, 4000),
+      '表单字段(每行一个): ',
+      fieldLines.slice(0, 4000),
       '',
-      '输出: 严格 JSON 数组, 每个元素 {"label":"表单字段标签原文","value":"填充值"}, 无填充值则 value 为 ""。不要输出 JSON 以外的任何文字。',
+      '输出格式(严格, 每行对应一个字段): ',
+      '字段序号|填充值',
+      '例如: 3|汉族 (信息库无对应则: 5|空)',
+      '不要输出任何其他文字。',
     ].join('\n');
     try {
-      const r = await chat([{ role: 'user', content: prompt }], { maxTokens: 2500, timeout: 120000, temperature: 0.2 });
-      // 提取 JSON 数组(容忍前后文字)
-      const m = String(r || '').match(/\[[\s\S]*\]/);
-      if (!m) return [];
-      const list = JSON.parse(m[0]);
-      if (!Array.isArray(list)) return [];
-      return list
-        .map((it) => ({ label: String(it.label || '').trim(), value: String(it.value || '').trim() }))
-        .filter((it) => it.label && it.value);
+      const r = await chat([{ role: 'user', content: prompt }], { maxTokens: 2000, timeout: 120000, temperature: 0.2 });
+      const items = [];
+      const lines = String(r || '').split(/\r?\n/);
+      for (const line of lines) {
+        const m = line.match(/^\s*(\d+)\s*[|｜，,]\s*(.+?)\s*$/);
+        if (!m) continue;
+        const idx = parseInt(m[1], 10) - 1;
+        let val = cleanAIValue(m[2]);
+        if (!val || val === '空') continue;
+        const f = (fieldsInfo || [])[idx];
+        if (!f) continue;
+        items.push({ label: f.label, value: val });
+      }
+      return items;
     } catch (e) {
       return [];
     }
