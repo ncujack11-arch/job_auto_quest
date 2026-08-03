@@ -305,12 +305,21 @@
           if (nl === fz.normalize(def.label)) score += 4;
         }
       }
-      if (ctx.placeholder && fz.containsAny(ctx.placeholder, def.kw)) { score += 4; hits.push('placeholder'); }
+      if (ctx.placeholder && fz.containsAny(ctx.placeholder, def.kw)) {
+        score += 4;
+        // 精确命中(如 "所在地" === "所在地")显著加权, 避免被长词子串(户籍所在地)同分抢先
+        if (def.kw.some((k) => fz.normalize(k) === fz.normalize(ctx.placeholder))) score += 3;
+        hits.push('placeholder');
+      }
       if (ctx.ariaLabel && fz.containsAny(ctx.ariaLabel, def.kw)) { score += 4; hits.push('aria'); }
       if (ctx.name && fz.containsAny(ctx.name, def.kw)) { score += 3; hits.push('name'); }
       if (ctx.dataTexts.length && ctx.dataTexts.some((d) => fz.containsAny(d, def.kw))) { score += 3; hits.push('data'); }
       if (ctx.id && fz.containsAny(ctx.id, def.kw)) { score += 2; hits.push('id'); }
-      if (ctx.prevText && fz.containsAny(ctx.prevText, def.kw)) { score += 2; hits.push('prev'); }
+      if (ctx.prevText && fz.containsAny(ctx.prevText, def.kw)) {
+        score += 2;
+        if (def.kw.some((k) => fz.normalize(k) === fz.normalize(ctx.prevText))) score += 2;
+        hits.push('prev');
+      }
       if (ctx.rowText && fz.containsAny(ctx.rowText, def.kw)) { score += 1; hits.push('row'); }
       if (score === 0) continue;
       if (!best || score > best.score) best = { fieldKey, score, hits };

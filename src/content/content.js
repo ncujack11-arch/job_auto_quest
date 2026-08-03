@@ -446,7 +446,8 @@
     };
     if (settings.ai && settings.ai.enabled && settings.ai.openQuestionAuto !== false) {
       let aiFilled = 0;
-      let aiSkipped = 0;
+      let aiFail = 0;
+      let aiFailMsg = '';
       try {
         const ctxInfo = grabPageInfo();
         const companyPos = [ctxInfo.company, ctxInfo.position].filter(Boolean).join(' · ') || '未知';
@@ -465,7 +466,7 @@
             const uctx = AS.matcher.buildContext(targetEl);
             if (!uctx.visible || targetEl.readOnly || targetEl.disabled) continue;
             const isOpen = AS.matcher.isOpenQuestionField(uctx);
-            if (!isOpen && !isAIFillable(uctx)) { aiSkipped++; continue; }
+            if (!isOpen && !isAIFillable(uctx)) continue;
             const label = (uctx.labelText || uctx.placeholder || uf.label || '开放题').slice(0, 60);
             setFillState('ai', `AI 生成: ${label.slice(0, 18)}...`);
             reportProgress('ai', { question: label });
@@ -490,15 +491,19 @@
               aiFilled++;
             }
           } catch (e) {
+            aiFail++;
+            aiFailMsg = e && e.message || String(e);
             LOG().warn('content', 'ai fill failed', e && e.message || e);
           }
         }
       } catch (e) { /* ignore */ }
       // AI 结果反馈: 用户明确知道 AI 做了什么/为什么没做
       if (aiFilled > 0) {
-        safeToast(`🤖 AI 已补充填写 ${aiFilled} 个字段(开放题/描述类)`, 4000);
+        safeToast(`🤖 AI 已补充填写 ${aiFilled} 个字段(从信息库匹配/开放题作答)`, 4000);
+      } else if (aiFail > 0) {
+        safeToast(`🤖 AI 调用失败(${aiFail} 次): ${aiFailMsg.slice(0, 80)} — 请检查 API Key/网络/模型名(配置页 → AI 工具 → 测试连接)`, 6000);
       } else {
-        safeToast('🤖 AI: 本页无可补充的开放题/描述类字段(事实信息如姓名/学校/薪资等 AI 不会编造, 请在信息库填写)', 5000);
+        safeToast('🤖 AI: 未匹配字段均无可从信息库补充的内容(信息库缺值, 可先去信息库完善)', 5000);
       }
     }
 

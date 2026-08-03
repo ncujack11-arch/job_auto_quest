@@ -8,6 +8,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const PORT = process.env.E2E_PORT || 8899;
+const __mockRequests = [];  // AI mock 请求记录(隐私脱敏验证用)
 
 const rnd = (n) => Math.floor(Math.random() * n);
 const pick = (arr) => arr[rnd(arr.length)];
@@ -149,6 +150,8 @@ const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
+      // 记录请求(验证隐私脱敏用)
+      __mockRequests.push(body);
       let question = '';
       try {
         const j = JSON.parse(body);
@@ -172,6 +175,8 @@ const server = http.createServer((req, res) => {
           [/籍贯/, () => (infoText.match(/籍贯:([^;]+)/) || [])[1]],
           [/政治面貌/, () => (infoText.match(/政治面貌:([^;]+)/) || [])[1]],
           [/期望城市|期望工作地点/, () => (infoText.match(/现居地:([^;]+)/) || [])[1]],
+          [/所在地|目前所在地|现居地|居住城市/, () => (infoText.match(/现居地:([^;]+)/) || [])[1]],
+          [/语言|英语/, () => (infoText.match(/英语:([^;]+)/) || [])[1]],
         ];
         for (const [re, fn] of rules) {
           if (re.test(field)) { matched = (fn() || '').trim(); if (matched) break; }
@@ -202,4 +207,4 @@ const server = http.createServer((req, res) => {
 if (require.main === module) {
   server.listen(PORT, () => console.log('E2E 随机表单服务:', 'http://127.0.0.1:' + PORT + '/form.html'));
 }
-module.exports = { server, PORT };
+module.exports = { server, PORT, __mockRequests };
