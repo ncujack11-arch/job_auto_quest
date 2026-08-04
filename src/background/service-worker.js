@@ -387,6 +387,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       break;
     }
 
+    case 'AF_AI_FILL_FLOAT': {
+      // 浮球菜单: AI 智能填充 → 转发给当前活动标签页
+      getActiveTab().then((tab) => {
+        if (!tab) return;
+        ensureInjected(tab.id).then((ok) => {
+          if (ok) chrome.tabs.sendMessage(tab.id, { type: 'AF_AI_FILL' }).catch(() => {});
+        });
+      });
+      break;
+    }
+
     case 'AF_ENSURE_INJECTED': {
       Promise.resolve().then(async () => {
         try {

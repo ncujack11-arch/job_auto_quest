@@ -241,9 +241,15 @@
       renderProgress();
       try {
         const ok = await ensureContentScript();
-        if (!ok) { showStatus('error', '无法注入脚本, 请刷新页面'); return; }
-        await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_AI_FILL' }).catch(() => {});
+        if (!ok) { showStatus('error', '无法注入脚本, 请刷新页面后重试'); return; }
+        // 回执: 页面脚本处理消息才返回 started, 无响应=旧版本脚本残留
+        const resp = await chrome.tabs.sendMessage(currentTab.id, { type: 'AF_AI_FILL' }).catch(() => null);
+        if (resp === null || !resp.started) {
+          progressDone = true;
+          showStatus('error', '页面脚本未响应(旧版本残留), 请刷新页面(F5)后重试');
+        }
       } catch (e) {
+        progressDone = true;
         showStatus('error', 'AI 填充失败: ' + (e.message || e));
       }
     });

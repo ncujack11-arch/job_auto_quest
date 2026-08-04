@@ -1191,6 +1191,7 @@
         break;
       case 'AF_AI_FILL':
         if (isCurrent() && window.top === window) {
+          sendResponse({ started: true, v: AS.__v || '' });
           aiFillAll();
         }
         break;
